@@ -1,0 +1,5 @@
+playwright>=1.49
+requests>=2.31
+# Optional: layered on top of the built-in manual stealth evasions when present.
+# The scraper works without it.
+playwright-stealth>=1.0.6

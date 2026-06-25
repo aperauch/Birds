@@ -1,0 +1,7 @@
+requests>=2.31.0
+Pillow>=10.0.0
+# Pimoroni Inky drivers (Impression / Spectra 6). The [rpi] extra pulls the
+# Raspberry Pi GPIO/SPI backends.
+inky[rpi]>=2.1.0
+# tomllib is stdlib on Python 3.11+; this is only needed on older interpreters.
+tomli>=2.0.1; python_version < "3.11"

@@ -1,0 +1,25 @@
+{
+  "name": "birds-edge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:all": "npm --prefix ../web run build && wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply birds --local",
+    "db:migrate": "wrangler d1 migrations apply birds --remote",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@cf-wasm/photon": "^0.3.6",
+    "@cloudflare/puppeteer": "^1.1.0",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "wrangler": "^4.49.0"
+  }
+}

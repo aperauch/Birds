@@ -1,0 +1,12 @@
+# Birds e-paper frame config. Copy to /etc/birds-frame.toml (or set
+# $BIRDS_FRAME_CONFIG) and fill in your values.
+
+# Public base URL of the edge Worker.
+base_url = "https://birds.aperauch.com"
+
+# Shared key gating /media/frame/*. Must match the Worker's FRAME_KEY var.
+# Leave empty if the Worker FRAME_KEY is unset (ungated).
+frame_key = ""
+
+# Inky color saturation (0.0 muted .. 1.0 vivid). 0.6 is a good start.
+saturation = 0.6

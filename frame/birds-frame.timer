@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the Birds e-paper frame every 15 minutes
+
+[Timer]
+# Shortly after boot, then every 15 minutes. Matches the Worker cron cadence.
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

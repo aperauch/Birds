@@ -1,0 +1,94 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "birds-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // birds.aperauch.com is served directly by this Worker as a custom domain.
+  // The zone aperauch.com must be active on this Cloudflare account.
+  "routes": [
+    {
+      "pattern": "birds.aperauch.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    // Built dashboard SPA (web/) is uploaded here once Phase 2 lands.
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AVIARY",
+        "class_name": "Aviary"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Aviary"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "birds",
+      "database_id": "3c15ce21-eebe-4dbc-bf28-711d0fe1c461",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "birds-media"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "b7938b18199a4625b24a1f93b0b48476"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "ART_QUEUE",
+        "queue": "birds-art"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "birds-art",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "birds-art-dlq"
+      }
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "triggers": {
+    // Regenerate the e-paper frame image every 15 minutes (Phase 5).
+    "crons": ["*/15 * * * *"]
+  },
+  "vars": {
+    "PUBLIC_BASE_URL": "https://birds.aperauch.com",
+    "MEDIA_PREFIX": "/media",
+    "RARE_SPECIES_DAYS": "30",
+    // FRAME_KEY gates /media/frame/* (set a real value to enable). NTFY_TOPIC
+    // enables ntfy notifications when set. VAPID_* are secrets (wrangler secret put).
+    "FRAME_KEY": "",
+    "NTFY_TOPIC": ""
+  }
+}

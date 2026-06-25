@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+.wrangler/
+**/.wrangler/
+*.tsbuildinfo
+
+# Secrets / local env
+.dev.vars
+**/.dev.vars
+.env
+*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+sensor/state.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Generated CF types
+worker-configuration.d.ts

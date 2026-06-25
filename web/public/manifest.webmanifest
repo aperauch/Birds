@@ -1,0 +1,20 @@
+{
+  "name": "Birds",
+  "short_name": "Birds",
+  "description": "A live collage of birds heard outside, near a state road.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5efe0",
+  "theme_color": "#f5efe0",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Trends", "short_name": "Trends", "url": "/#/trends" },
+    { "name": "Live collage", "short_name": "Live", "url": "/" }
+  ]
+}

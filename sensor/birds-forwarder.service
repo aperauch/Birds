@@ -1,0 +1,23 @@
+[Unit]
+Description=Birds sensor forwarder (BirdNET-Pi -> Cloudflare edge)
+After=network-online.target birdnet_analysis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Match the user that owns the BirdNET-Pi install (often "birdnet").
+User=birdnet
+EnvironmentFile=/etc/birds-forwarder.env
+WorkingDirectory=/home/birdnet/Birds/sensor
+ExecStart=/home/birdnet/Birds/sensor/.venv/bin/python /home/birdnet/Birds/sensor/forwarder.py
+Restart=always
+RestartSec=10
+# Hardening: outbound-only, no privilege, read-only access to the home dir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/birdnet/Birds/sensor
+
+[Install]
+WantedBy=multi-user.target

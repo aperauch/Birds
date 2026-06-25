@@ -1,0 +1,13 @@
+[Unit]
+Description=Birds e-paper frame refresh (pull dithered PNG -> Inky Impression)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Match the user that owns this checkout (often "pi").
+User=pi
+WorkingDirectory=/home/pi/Birds/frame
+ExecStart=/home/pi/Birds/frame/.venv/bin/python /home/pi/Birds/frame/display.py
+# SPI/GPIO access is needed for the panel, so no ProtectSystem=strict here.
+Nice=10
