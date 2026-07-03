@@ -73,6 +73,9 @@ export interface DailyStats {
   days: number;
   daily: { date: string; count: number }[];
   top_species: { sci_name: string; com_name: string; count: number }[];
+  // Every per-species per-day rollup row in the range — raw material for the
+  // client-side analytics (sparklines, streaks, diversity, week-over-week).
+  series: { date: string; sci_name: string; com_name: string; count: number }[];
 }
 
 export function statsDaily(days = 30): Promise<DailyStats> {
@@ -98,15 +101,17 @@ export interface DielSpecies {
   hours: number[]; // length 24, Eastern local hour-of-day
 }
 
-// Per-species calls by Eastern hour-of-day over a window (heatmap + stacked bars).
-export function statsDiel(days = 30, limit = 12): Promise<{
+// Per-species calls by Eastern hour-of-day over a window (heatmap + stacked
+// bars), or — with `sci` — a single species' 24h profile (no "Other" fold).
+export function statsDiel(days = 30, limit = 12, sci?: string): Promise<{
   from: number;
   to: number;
   species: DielSpecies[];
   total: number[];
   species_count: number;
 }> {
-  return getJSON(`/api/stats/diel?days=${days}&limit=${limit}`);
+  const sciParam = sci ? `&sci=${encodeURIComponent(sci)}` : "";
+  return getJSON(`/api/stats/diel?days=${days}&limit=${limit}${sciParam}`);
 }
 
 export interface CoocSpecies { sci_name: string; com_name: string; buckets: number }
@@ -138,4 +143,35 @@ export interface Anomaly {
 // Notable detections: new-to-site, returned-after-absence, uncommon.
 export function statsAnomalies(days = 30): Promise<{ days: number; items: Anomaly[] }> {
   return getJSON(`/api/stats/anomalies?days=${days}`);
+}
+
+// Weekday x Eastern-hour punchcard. matrix[dow][hour], dow 0=Sun..6=Sat.
+export function statsPunchcard(days = 30): Promise<{
+  from: number;
+  to: number;
+  days: number;
+  matrix: number[][];
+}> {
+  return getJSON(`/api/stats/punchcard?days=${days}`);
+}
+
+export interface FirstLastDay {
+  date: string;
+  first_ts: number;
+  last_ts: number;
+}
+export interface SunDay {
+  date: string;
+  sunrise: number;
+  sunset: number;
+}
+
+// Per-date first/last detection instant, with an optional sunrise/sunset
+// overlay (present only when the server has site coordinates configured).
+export function statsFirstLast(days = 60): Promise<{
+  days: number;
+  items: FirstLastDay[];
+  sun?: SunDay[];
+}> {
+  return getJSON(`/api/stats/firstlast?days=${days}`);
 }

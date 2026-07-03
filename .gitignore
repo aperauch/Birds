@@ -30,3 +30,7 @@ Thumbs.db
 
 # Generated CF types
 worker-configuration.d.ts
+
+# Playwright
+web/test-results/
+web/playwright-report/

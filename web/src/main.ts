@@ -4,8 +4,11 @@ import { highlightTile, renderCollage, resetCollage, setCaptionEl, type CollageC
 import { renderCards, renderList, highlightInContainer } from "./views";
 import { closeModal, openModal } from "./modal";
 import { renderTrends } from "./trends";
+import { renderDay } from "./day";
 import { createDropdown, type DropdownHandle } from "./dropdown";
 import { LiveFeed } from "./ws";
+import { ageLabel, escapeAttr, escapeHtml } from "./format";
+import { showToast } from "./toast";
 import type {
   Detection,
   SortMode,
@@ -58,7 +61,9 @@ const barEl = document.getElementById("bar") as HTMLElement;
 const collageEl = document.getElementById("collage") as HTMLElement;
 const collageNameEl = document.getElementById("collage-name") as HTMLElement;
 const trendsEl = document.getElementById("trends") as HTMLElement;
+const dayEl = document.getElementById("day") as HTMLElement;
 const viewLinkEl = document.getElementById("view-link") as HTMLAnchorElement;
+const dayLinkEl = document.getElementById("day-link") as HTMLAnchorElement;
 const tickerEl = document.getElementById("ticker") as HTMLElement;
 const controlsEl = document.getElementById("controls") as HTMLElement;
 const windowsEl = document.getElementById("windows") as HTMLElement;
@@ -232,12 +237,46 @@ const collageCtx: CollageCtx = {
   },
 };
 
+function reduceMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+// Animate a header count from its previous value (a small "counting up" tick
+// as calls come in). Jumps straight to the value on big deltas, first paint,
+// or when the OS asks for reduced motion.
+function setCount(el: HTMLElement, value: number, label: string): void {
+  const prev = Number(el.dataset.n ?? "NaN");
+  el.dataset.n = String(value);
+  const paint = (n: number) => (el.textContent = `${n} ${label}`);
+  if (!Number.isFinite(prev) || prev === value || Math.abs(value - prev) > 400 || reduceMotion()) {
+    paint(value);
+    return;
+  }
+  const start = performance.now();
+  const dur = 500;
+  const step = (t: number): void => {
+    if (el.dataset.n !== String(value)) return; // a newer value took over
+    const k = Math.min(1, (t - start) / dur);
+    paint(Math.round(prev + (value - prev) * (1 - Math.pow(1 - k, 3))));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function updateCounts(): void {
   let total = 0;
   for (const a of aggs.values()) total += a.count;
-  speciesCountEl.textContent = `${aggs.size} species`;
-  detectionCountEl.textContent = `${total} calls`;
+  setCount(speciesCountEl, aggs.size, "species");
+  setCount(detectionCountEl, total, "calls");
   emptyEl.hidden = aggs.size > 0;
+}
+
+// Progressive enhancement: crossfade bigger UI swaps (view/route changes) with
+// the View Transitions API where supported.
+function withViewTransition(mutate: () => void): void {
+  const d = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+  if (d.startViewTransition && !reduceMotion()) d.startViewTransition(mutate);
+  else mutate();
 }
 
 // Tiles open the species modal via the URL so the view is deep-linkable and
@@ -285,7 +324,7 @@ function aggForSci(sci: string): SpeciesAgg {
 // can wipe the old DOM (and the collage's cached tile state) exactly once.
 let renderedView: ViewMode | null = null;
 
-const repack = debounce(() => {
+function doRepack(): void {
   if (renderedView !== viewMode) {
     collageEl.innerHTML = "";
     collageEl.onclick = null;
@@ -306,7 +345,8 @@ const repack = debounce(() => {
     renderList(collageEl, sortedAggs().filter(matchesQuery), collageCtx, navigateToSpecies);
   }
   updateCounts();
-}, 120);
+}
+const repack = debounce(doRepack, 120);
 
 // The header is fixed and wraps onto multiple rows on small screens, so the
 // scrollable cards/list views need their top padding to match its live height.
@@ -446,19 +486,30 @@ function onTickerClick(e: MouseEvent): void {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-  );
-}
-const escapeAttr = escapeHtml;
+// Monotonic token so a slow /api/aggregate response can never clobber a newer
+// window selection (rapid window switches race otherwise).
+let loadGen = 0;
 
 async function loadWindow(): Promise<void> {
+  const gen = ++loadGen;
   const to = Math.floor(Date.now() / 1000);
+  let species;
+  try {
+    ({ species } = await aggregateWindow(windowFrom(), to));
+  } catch {
+    if (gen !== loadGen) return; // superseded — the newer load owns the UI
+    if (aggs.size === 0) renderLoadError();
+    // Keep whatever is on screen; a stale collage beats a false "no birds".
+    showToast("Couldn't load detections.", {
+      action: { label: "Retry", onClick: () => void loadWindow() },
+    });
+    return;
+  }
+  if (gen !== loadGen) return;
+  // Swap state only now that the snapshot landed (never clear-then-fail).
   aggs.clear();
   seenIds.clear(); // authoritative snapshot; live deltas dedupe against aggAsOf
   aggAsOf = to;
-  const { species } = await aggregateWindow(windowFrom(), to);
   for (const s of species) {
     const a: SpeciesAgg = {
       sci_name: s.sci_name,
@@ -476,6 +527,21 @@ async function loadWindow(): Promise<void> {
     aggs.set(s.sci_name, a);
   }
   repack();
+}
+
+// First-load failure: replace the skeleton with a retryable message instead of
+// leaving the shimmer (or a misleading "no birds yet") up forever.
+function renderLoadError(): void {
+  renderedView = null; // a later successful repack must rebuild from scratch
+  collageEl.className = "mode-cards";
+  collageEl.innerHTML = `<div class="load-error">
+    <p>Couldn't load the birds.</p>
+    <button type="button" class="retry">Retry</button>
+  </div>`;
+  collageEl.querySelector(".retry")?.addEventListener("click", () => {
+    renderSkeleton();
+    void loadWindow();
+  });
 }
 
 async function refreshSpeciesIndex(): Promise<void> {
@@ -500,16 +566,6 @@ function onMessage(msg: WireMessage): void {
 
 function nowS(): number {
   return Math.floor(Date.now() / 1000);
-}
-
-// "just now" / "23m ago" / "3h ago" / "2d ago".
-function ageLabel(sec: number): string {
-  if (sec < 90) return "just now";
-  const m = Math.round(sec / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
 }
 
 // Paint the connection dot from sensor liveness (green = a detection within the
@@ -551,7 +607,8 @@ function setView(v: ViewMode): void {
     c.classList.toggle("active", (c as HTMLElement).dataset.view === v);
   }
   syncControls();
-  repack();
+  // Swap synchronously inside the transition so the crossfade pairs the views.
+  withViewTransition(doRepack);
 }
 
 function buildViewPicker(): void {
@@ -581,7 +638,10 @@ function buildControls(): void {
     value: WINDOWS.find((w) => w.hours === windowHours)?.value ?? "24h",
     options: WINDOWS.map((w) => ({ value: w.value, label: w.label })),
     onChange: (v) => {
-      windowHours = WINDOWS.find((w) => w.value === v)?.hours ?? 24;
+      // Ternary, not `??`: the "all" entry's `hours: null` is a meaningful value
+      // (no lower bound), and `??` would coalesce it back to the 24h default.
+      const w = WINDOWS.find((w) => w.value === v);
+      windowHours = w ? w.hours : 24;
       localStorage.setItem("birds.window", v);
       void loadWindow();
     },
@@ -602,9 +662,10 @@ function buildControls(): void {
   sortsEl.replaceChildren(sortDD.el);
 }
 
-// Minimal hash router: analytics (#/trends), a species deep link
-// (#sci=<scientific name>) that opens the detail modal over the collage, or the
-// default collage (#/). The modal is an overlay, so #sci= keeps the collage view.
+// Minimal hash router: analytics (#/trends), the day explorer (#/day), a
+// species deep link (#sci=<scientific name>) that opens the detail modal over
+// the collage, or the default collage (#/). The modal is an overlay, so
+// #sci= keeps whichever main view is underneath.
 function applyRoute(): void {
   const hash = location.hash;
   let sci: string | null = null;
@@ -616,15 +677,47 @@ function applyRoute(): void {
     }
   }
   const trends = hash === "#/trends";
+  const day = hash === "#/day";
+  const sub = trends || day; // any non-collage main view
 
   trendsEl.hidden = !trends;
-  collageEl.style.display = trends ? "none" : "";
-  tickerEl.style.display = trends ? "none" : "";
-  controlsEl.style.display = trends ? "none" : "";
+  dayEl.hidden = !day;
+  collageEl.style.display = sub ? "none" : "";
+  tickerEl.style.display = sub ? "none" : "";
+  controlsEl.style.display = sub ? "none" : "";
   syncControls(); // sort enabled-state + bar height
-  viewLinkEl.textContent = trends ? "← Collage" : "Trends →";
-  viewLinkEl.setAttribute("href", trends ? "#/" : "#/trends");
+
+  // Both nav links read "X →" on the collage; whichever sub-view is active
+  // becomes the single "← Collage" link, and the other is hidden.
+  if (day) {
+    dayLinkEl.textContent = "← Collage";
+    dayLinkEl.setAttribute("href", "#/");
+    dayLinkEl.hidden = false;
+    viewLinkEl.hidden = true;
+  } else if (trends) {
+    viewLinkEl.textContent = "← Collage";
+    viewLinkEl.setAttribute("href", "#/");
+    viewLinkEl.hidden = false;
+    dayLinkEl.hidden = true;
+  } else {
+    dayLinkEl.textContent = "Day →";
+    dayLinkEl.setAttribute("href", "#/day");
+    viewLinkEl.textContent = "Trends →";
+    viewLinkEl.setAttribute("href", "#/trends");
+    dayLinkEl.hidden = false;
+    viewLinkEl.hidden = false;
+  }
   if (trends) void renderTrends(trendsEl);
+  if (day) void renderDay(dayEl);
+
+  const speciesName = sci ? (speciesIndex.get(sci)?.com_name ?? aggs.get(sci)?.com_name) : null;
+  document.title = sci
+    ? `${speciesName ?? sci} — Birds`
+    : trends
+      ? "Trends — Birds"
+      : day
+        ? "Day — Birds"
+        : "Birds";
 
   if (sci) void openModal(aggForSci(sci));
   else closeModal();
@@ -648,7 +741,8 @@ function renderSkeleton(): void {
     .join("")}</div>`;
 }
 
-// Keyboard shortcuts: / focus search, 1/2/3 switch layout, t toggle Trends.
+// Keyboard shortcuts: / focus search, 1/2/3 switch layout, t toggle Trends,
+// d toggle Day explorer.
 function setupShortcuts(): void {
   window.addEventListener("keydown", (e) => {
     const t = e.target as HTMLElement | null;
@@ -665,6 +759,8 @@ function setupShortcuts(): void {
     else if (e.key === "3") setView("list");
     else if (e.key === "t" || e.key === "T") {
       location.hash = location.hash === "#/trends" ? "#/" : "#/trends";
+    } else if (e.key === "d" || e.key === "D") {
+      location.hash = location.hash === "#/day" ? "#/" : "#/day";
     }
   });
 }
@@ -685,6 +781,10 @@ async function main(): Promise<void> {
   setupShortcuts();
   buildControls();
   tickerEl.addEventListener("click", onTickerClick);
+  // Not view-transitioned: collage/trends/day are structurally unrelated
+  // layouts, and crossfading between them looks like a confusing double
+  // exposure rather than a clean transition (unlike the collage/cards/list
+  // switch below, which shares the same container and visual language).
   window.addEventListener("hashchange", applyRoute);
   renderSkeleton();
   await refreshSpeciesIndex();
@@ -721,7 +821,13 @@ async function main(): Promise<void> {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void pollLive();
   });
-  window.addEventListener("online", () => void pollLive());
+  window.addEventListener("online", () => {
+    showToast("Back online — catching up…");
+    void pollLive();
+  });
+  window.addEventListener("offline", () => {
+    showToast("Offline — live updates paused.");
+  });
   // ALL/relative windows drift; refresh relative windows periodically.
   window.setInterval(() => {
     if (windowHours !== null) void loadWindow();

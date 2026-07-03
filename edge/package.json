@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply birds --local",
     "db:migrate": "wrangler d1 migrations apply birds --remote",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "vitest run"
   },
   "dependencies": {
     "@cf-wasm/photon": "^0.3.6",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2",
+    "vitest": "^4.1.9",
     "wrangler": "^4.49.0"
   }
 }

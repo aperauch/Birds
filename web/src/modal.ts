@@ -1,14 +1,12 @@
-import { speciesDetail, type PlumagePhoto, type PlumageSource } from "./api";
-import type { SpeciesAgg } from "./types";
+import { statsDaily, statsDiel, speciesDetail, type DailyStats, type PlumagePhoto, type PlumageSource } from "./api";
+import type { Detection, Species, SpeciesAgg } from "./types";
 import { renderWaveform } from "./waveform";
-
-// Deterministic per-species hue (same hashing as the collage tiles) used to
-// tint the audio waveforms.
-function hueFor(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-  return h;
-}
+import { escapeHtml, hourLabel } from "./format";
+import { colorFor, hueFor } from "./color";
+import { isPlaying, onPlayerChange, play, progress } from "./player";
+import { imgURL } from "./img";
+import { barChart, chartHost, spark } from "./charts";
+import { sparkSeries } from "./analytics";
 
 const el = () => document.getElementById("modal") as HTMLElement;
 
@@ -36,6 +34,12 @@ function fmtTime(ts: number): string {
 // browser back button works for #sci= deep links.
 // The element focused before the dialog opened, so focus can be restored on close.
 let lastFocused: HTMLElement | null = null;
+// Subscribed only while the modal is open, so a clip's play button reflects
+// the shared player's state (and toggles off if another view starts a clip).
+let unsubPlayer: (() => void) | undefined;
+// Animates spectrogram progress cursors; runs only while something is
+// actually playing (started/stopped from the player-state subscription).
+let cursorRaf: number | undefined;
 
 function dismiss(): void {
   if (location.hash.startsWith("#sci=")) location.hash = "#/";
@@ -79,6 +83,9 @@ export function closeModal(): void {
   const m = el();
   if (m.hidden) return;
   clearPlumage();
+  unsubPlayer?.();
+  unsubPlayer = undefined;
+  stopCursorLoop();
   m.hidden = true;
   m.innerHTML = "";
   delete m.dataset.sci;
@@ -117,12 +124,16 @@ export async function openModal(agg: SpeciesAgg): Promise<void> {
   if (!wasOpen) {
     m.addEventListener("click", onBackdrop);
     document.addEventListener("keydown", onKey);
+    unsubPlayer = onPlayerChange(syncPlayButtons);
   }
   (m.querySelector(".x") as HTMLElement | null)?.focus(); // move focus into the dialog
 
   try {
-    const { species, recent, cub_url, plumage_photos, plumage_source } =
-      await speciesDetail(agg.sci_name);
+    const [{ species, recent, cub_url, plumage_photos, plumage_source }, daily, diel] = await Promise.all([
+      speciesDetail(agg.sci_name),
+      statsDaily(30),
+      statsDiel(30, 1, agg.sci_name),
+    ]);
     if (m.dataset.sci !== agg.sci_name) return; // navigated away / switched species
     // Backfill the header from authoritative detail — a #sci= deep link may open
     // with a minimal agg whose com_name is just the scientific name.
@@ -142,6 +153,7 @@ export async function openModal(agg: SpeciesAgg): Promise<void> {
         <span>best ${(species.best_confidence * 100) | 0}%</span>
         <span>last ${fmtTime(species.last_seen)}</span>
       </div>
+      <div class="species-charts"></div>
       ${renderPlumage(plumage_photos, plumage_source)}
       <div class="clips">
         ${
@@ -149,9 +161,9 @@ export async function openModal(agg: SpeciesAgg): Promise<void> {
             ? clips
                 .map(
                   (d) => `<figure class="clip">
-              <canvas class="wave" data-clip="${escapeHtml(d.clip_url ?? "")}" data-hue="${hue}"></canvas>
+              ${recordingMediaHtml(d, hue)}
               <figcaption>${fmtTime(d.ts)} · ${(d.confidence * 100) | 0}%</figcaption>
-              <audio controls preload="none" src="${d.clip_url}"></audio>
+              ${playButtonHtml(d.clip_url, fmtTime(d.ts))}
             </figure>`,
                 )
                 .join("")
@@ -166,6 +178,8 @@ export async function openModal(agg: SpeciesAgg): Promise<void> {
         <button type="button" class="share" data-share>Copy link</button>
       </div>`;
     initPlumage(body);
+    wireSpeciesCharts(body, species, daily, diel.species[0]?.hours ?? new Array(24).fill(0));
+    wirePlayButtons(body, species.com_name);
     // Copy a shareable deep link to this species.
     body.querySelector<HTMLButtonElement>("[data-share]")?.addEventListener("click", (ev) => {
       const btn = ev.currentTarget as HTMLButtonElement;
@@ -189,6 +203,133 @@ export async function openModal(agg: SpeciesAgg): Promise<void> {
     if (m.dataset.sci !== agg.sci_name) return; // navigated away / switched species
     const body = m.querySelector(".sheet-body");
     if (body) body.innerHTML = `<p class="loading">Couldn't load details.</p>`;
+  }
+}
+
+function emptyChart(text: string): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "loading";
+  p.textContent = text;
+  return p;
+}
+
+// Two compact species-history charts, under the calls/best/last stats row: a
+// 30-day sparkline (from the same daily rollup Trends uses) and a 24h Eastern
+// activity profile (the single-species form of /api/stats/diel).
+function wireSpeciesCharts(
+  body: Element,
+  species: Species,
+  daily: DailyStats,
+  dielHours: number[],
+): void {
+  const slot = body.querySelector<HTMLElement>(".species-charts");
+  if (!slot) return;
+  const today = new Date().toISOString().slice(0, 10); // daily_stats buckets by UTC date
+  const color = colorFor(species.sci_name);
+
+  const sparkValues = sparkSeries(daily.series, species.sci_name, daily.from, today);
+  const sparkWrap = document.createElement("div");
+  sparkWrap.className = "species-chart";
+  sparkWrap.innerHTML = `<h4>Last 30 days</h4>`;
+  sparkWrap.append(
+    sparkValues.some((v) => v > 0)
+      ? chartHost((w) => spark(sparkValues, color, w, 40))
+      : emptyChart("No calls in the last 30 days."),
+  );
+
+  const dielWrap = document.createElement("div");
+  dielWrap.className = "species-chart";
+  dielWrap.innerHTML = `<h4>By hour — Eastern time</h4>`;
+  const hourLabels = Array.from({ length: 24 }, (_, h) => hourLabel(h));
+  dielWrap.append(
+    dielHours.some((v) => v > 0)
+      ? chartHost((w) => barChart(dielHours, hourLabels, color, 6, w, 90))
+      : emptyChart("No activity in the last 30 days."),
+  );
+
+  slot.append(sparkWrap, dielWrap);
+}
+
+// A recording's play control. Label + aria-label are kept in sync with the
+// shared player via syncPlayButtons() (subscribed while the modal is open).
+function playButtonHtml(url: string | null, whenLabel: string): string {
+  return `<button type="button" class="play-btn" data-url="${escapeHtml(url ?? "")}" data-label="${escapeHtml(whenLabel)}" aria-label="Play recording from ${escapeHtml(whenLabel)}">▶ Play</button>`;
+}
+
+// The real spectrogram PNG (with a playback-progress cursor) when one was
+// captured for this detection; otherwise the synthetic waveform (rendered
+// client-side from the audio itself — see wireClipMedia()).
+function recordingMediaHtml(d: Detection, hue: number): string {
+  if (d.spectrogram_url) {
+    const src = escapeHtml(imgURL(d.spectrogram_url, 320) ?? d.spectrogram_url);
+    return `<div class="spectro" data-url="${escapeHtml(d.clip_url ?? "")}">
+      <img src="${src}" alt="" loading="lazy" />
+      <span class="spectro-cursor"></span>
+    </div>`;
+  }
+  return `<canvas class="wave" data-clip="${escapeHtml(d.clip_url ?? "")}" data-hue="${hue}"></canvas>`;
+}
+
+// Paint each spectrogram's cursor at the shared player's current position for
+// that clip (0 when it isn't the loaded clip, or frozen at its last position
+// while paused).
+function paintCursors(): void {
+  for (const wrap of el().querySelectorAll<HTMLElement>(".spectro")) {
+    const url = wrap.dataset.url;
+    const cursor = wrap.querySelector<HTMLElement>(".spectro-cursor");
+    if (cursor && url) cursor.style.left = `${(progress(url) * 100).toFixed(2)}%`;
+  }
+}
+
+function startCursorLoop(): void {
+  if (cursorRaf !== undefined) return;
+  const step = (): void => {
+    paintCursors();
+    cursorRaf = requestAnimationFrame(step);
+  };
+  cursorRaf = requestAnimationFrame(step);
+}
+
+function stopCursorLoop(): void {
+  if (cursorRaf !== undefined) {
+    cancelAnimationFrame(cursorRaf);
+    cursorRaf = undefined;
+  }
+}
+
+function wirePlayButtons(body: Element, comName: string): void {
+  const buttons = body.querySelectorAll<HTMLButtonElement>(".play-btn");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const url = btn.dataset.url;
+      if (url) play({ url, title: comName, sub: btn.dataset.label });
+    });
+    // Reflect a clip that's already playing (e.g. reopening the same species).
+    if (btn.dataset.url && isPlaying(btn.dataset.url)) {
+      paintPlayButton(btn, true);
+      startCursorLoop();
+    }
+  });
+}
+
+function paintPlayButton(btn: HTMLButtonElement, active: boolean): void {
+  btn.classList.toggle("playing", active);
+  btn.textContent = active ? "❚❚ Pause" : "▶ Play";
+  btn.setAttribute("aria-label", `${active ? "Pause" : "Play"} recording from ${btn.dataset.label ?? ""}`);
+}
+
+// Keeps every play button (and any spectrogram cursor) in the (possibly
+// re-rendered) modal in sync with the shared player, including turning off a
+// button when a different clip starts. The cursor rAF loop runs only while
+// something is actually playing — paused/idle audio never animates.
+function syncPlayButtons(url: string | null, playing: boolean): void {
+  for (const btn of el().querySelectorAll<HTMLButtonElement>(".play-btn")) {
+    paintPlayButton(btn, playing && btn.dataset.url === url);
+  }
+  if (playing) startCursorLoop();
+  else {
+    stopCursorLoop();
+    paintCursors(); // freeze at the last position instead of leaving a stale frame
   }
 }
 
@@ -260,19 +401,3 @@ function initPlumage(root: ParentNode): void {
   start();
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => {
-    switch (c) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}

@@ -47,10 +47,20 @@ All public surface lives on Cloudflare.
 - [x] Phase 1 — Cloudflare data backbone (D1, R2, Ingest, Aviary DO)
 - [x] Phase 2 — Live dashboard MVP (WebSocket feed, collage, click-to-listen, timeline)
 - [x] Phase 3 — Art pipeline (Wikipedia photo, FLUX.2 species art, SDXL img2img of spectrograms)
-- [x] Phase 3.5 — Background cutout + silhouette-mask packing + generative data-art
+- [ ] Phase 3.5 — Background cutout (3.5a) done; silhouette-mask packing and
+      the generative/data-art tile style (3.5b/c) were not built — the collage
+      still packs rectangular tiles (see `web/README.md` Notes)
 - [x] Phase 4 — Analytics (daily rollups, trends view, charts) + streamed CSV export
 - [x] Phase 5 — Color e-paper frame (`/frame` + edge dither + cron + Pi client)
-- [x] Phase 6 — Notifications (ntfy + Web Push / VAPID)
+- [x] Phase 6 — Notifications (ntfy + Web Push / VAPID server-side; the
+      dashboard has no subscribe button wired up yet — `web/src/notify.ts` is
+      unused)
+- [x] Phase 7 — Dashboard polish & analytics expansion: self-hosted fonts,
+      theme-aware charts, error/retry states, mobile bottom-sheet modal, a day
+      explorer (`#/day`), a shared mini audio player, real spectrograms with a
+      playback cursor, expanded Trends (records/streaks, sparklines,
+      diversity, weekday×hour punchcard, dawn-chorus-vs-sunrise), and unit
+      (Vitest) + end-to-end (Playwright) test suites for `web/` and `edge/`
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [infra/SETUP.md](infra/SETUP.md) to provision and deploy; the read API is
@@ -62,10 +72,12 @@ documented in [docs/API.md](docs/API.md).
 cd edge
 npm install                       # adds @cf-wasm/photon + @cloudflare/puppeteer
 npx wrangler d1 migrations apply birds --remote   # 0002 cutout, 0003 stats, 0004 push
-# Optional config: gate the frame image, enable notifications
+# Optional config: gate the frame image, enable notifications, sunrise overlay
 npx wrangler secret put VAPID_PUBLIC_KEY          # web push (or leave unset)
 npx wrangler secret put VAPID_PRIVATE_KEY
 npx wrangler secret put VAPID_SUBJECT             # e.g. mailto:you@example.com
+npx wrangler secret put SITE_LAT                  # optional: Trends dawn-chorus sunrise overlay
+npx wrangler secret put SITE_LON                  # negative = west; never exposed to the client
 # set FRAME_KEY / NTFY_TOPIC vars in wrangler.jsonc as desired
 cd ../web && npm run build && cd ../edge && npx wrangler deploy
 ```

@@ -1,12 +1,12 @@
 // Birds service worker.
 //   1. Web Push notifications (Phase 6).
 //   2. Caching to speed up repeat loads:
-//        - hashed /assets/* + Google Fonts -> cache-first (immutable)
+//        - hashed /assets/* + self-hosted /fonts/* -> cache-first (immutable)
 //        - navigations (index.html)        -> network-first, cache fallback
 //        - /api/species                    -> stale-while-revalidate
 //      Live/data endpoints (/api/recent, /api/aggregate, /ws, /media, images)
 //      are left to the browser HTTP cache / network so data stays fresh.
-const CACHE = "birds-cache-v1";
+const CACHE = "birds-cache-v2"; // v2: self-hosted fonts replaced Google Fonts
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -64,13 +64,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   const sameOrigin = url.origin === self.location.origin;
-  const isFont =
-    url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
 
-  if (sameOrigin && url.pathname.startsWith("/assets/")) {
-    event.respondWith(cacheFirst(req)); // hashed, immutable
-  } else if (isFont) {
-    event.respondWith(cacheFirst(req));
+  if (sameOrigin && (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/fonts/"))) {
+    event.respondWith(cacheFirst(req)); // hashed assets + fonts: immutable
   } else if (sameOrigin && url.pathname === "/api/species") {
     event.respondWith(staleWhileRevalidate(req));
   } else if (req.mode === "navigate") {

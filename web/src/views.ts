@@ -8,33 +8,10 @@
 import type { SpeciesAgg } from "./types";
 import type { CollageCtx } from "./collage";
 import { imgURL } from "./img";
+import { escapeAttr, escapeHtml, relTime } from "./format";
+import { hueFor } from "./color";
 
 type OpenFn = (sci: string) => void;
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-  );
-}
-const escapeAttr = escapeHtml;
-
-// Deterministic per-species hue for the no-photo placeholder (matches collage).
-function hue(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-  return h;
-}
-
-function relTime(ts: number): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-  if (s < 45) return "just now";
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  return `${d}d ago`;
-}
 
 function plural(n: number, w: string): string {
   return `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -53,7 +30,7 @@ function thumbHtml(ctx: CollageCtx, a: SpeciesAgg, width: number): string {
     const src = escapeAttr(imgURL(url, width) ?? url);
     return `<img class="thumb" loading="lazy" decoding="async" src="${src}" alt="" />`;
   }
-  return `<span class="thumb noimg" style="--hue:${hue(a.sci_name)}"></span>`;
+  return `<span class="thumb noimg" style="--hue:${hueFor(a.sci_name)}"></span>`;
 }
 
 // One delegated click handler per render: open the species whose card/row was

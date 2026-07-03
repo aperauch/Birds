@@ -35,12 +35,9 @@
     <meta name="twitter:description" content="A live collage of birds heard outside, near a state road." />
     <meta name="twitter:image" content="https://birds.aperauch.com/og.png" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Self-hosted fonts (declared in styles.css); preload so text settles fast. -->
+    <link rel="preload" href="/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/fraunces-latin-var.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <a class="skip" href="#collage">Skip to birds</a>
@@ -50,6 +47,7 @@
         <span class="dot" id="conn" role="img" aria-label="Connecting…" title="Connecting…"></span>
         <h1>Birds</h1>
         <span class="sub">birds heard at aperauch.com</span>
+        <a id="day-link" class="view-link" href="#/day">Day →</a>
         <a id="view-link" class="view-link" href="#/trends">Trends →</a>
       </div>
       <div id="controls">
@@ -76,6 +74,7 @@
     <div id="collage-name" class="collage-name" aria-hidden="true"></div>
 
     <section id="trends" class="trends" aria-label="analytics" hidden></section>
+    <section id="day" class="day-view" aria-label="day explorer" hidden></section>
 
     <aside id="ticker" aria-label="live feed"></aside>
 

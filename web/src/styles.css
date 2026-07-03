@@ -1,3 +1,22 @@
+/* Self-hosted variable fonts (latin subset) — served same-origin from
+   /fonts/ so first paint never blocks on a third-party stylesheet. */
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/fraunces-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/inter-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --bg: #f5efe0;
   --bg2: #efe7d4;
@@ -11,6 +30,20 @@
   --bar-top: rgba(245, 239, 224, 0.92);
   --skel: rgba(58, 50, 38, 0.09);
   --skel-sheen: rgba(58, 50, 38, 0.04);
+  /* Chart tokens: per-species series colours are hsl(hue --chart-s --chart-l);
+     heat cells compose rgb(--heat* / alpha). Dark theme lifts the lightness so
+     series stay readable on the dark card background. */
+  --chart-s: 60%;
+  --chart-l: 45%;
+  --chart-other: #9b8e76;
+  --heat: 138 90 43; /* accent heat ramp (diel heatmap, calendar) */
+  --heat-2: 74 138 61; /* green ramp (co-occurrence) */
+  /* Validated (scripts/validate_palette.js, light, surface #fffdf7): lightness
+     band, chroma floor, CVD separation (worst pair ΔE 23.4), contrast all pass. */
+  --chart-line-1: #a8631f;
+  --chart-line-2: #2f7d4f;
+  --chart-line-3: #3a6bc4;
+  --chart-line-4: #9c7a2e;
   color-scheme: light;
 }
 
@@ -30,6 +63,17 @@
     --bar-top: rgba(23, 19, 14, 0.92);
     --skel: rgba(255, 255, 255, 0.07);
     --skel-sheen: rgba(255, 255, 255, 0.04);
+    --chart-s: 52%;
+    --chart-l: 62%;
+    --chart-other: #8d806f;
+    --heat: 214 143 77;
+    --heat-2: 122 184 106;
+    /* Validated (dark, surface #241e16): lightness band, chroma floor, CVD
+       separation (worst pair ΔE 22.9), contrast all pass. */
+    --chart-line-1: #c67f3a;
+    --chart-line-2: #43a06e;
+    --chart-line-3: #7690da;
+    --chart-line-4: #b28c40;
     color-scheme: dark;
   }
 }
@@ -46,6 +90,15 @@
   --bar-top: rgba(23, 19, 14, 0.92);
   --skel: rgba(255, 255, 255, 0.07);
   --skel-sheen: rgba(255, 255, 255, 0.04);
+  --chart-s: 52%;
+  --chart-l: 62%;
+  --chart-other: #8d806f;
+  --heat: 214 143 77;
+  --heat-2: 122 184 106;
+  --chart-line-1: #c67f3a;
+  --chart-line-2: #43a06e;
+  --chart-line-3: #7690da;
+  --chart-line-4: #b28c40;
   color-scheme: dark;
 }
 
@@ -238,7 +291,7 @@ html, body {
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: calc(var(--bar-h, 60px) + 0.7rem) clamp(0.7rem, 3vw, 1.5rem) 5.5rem;
+  padding: calc(var(--bar-h, 60px) + 0.7rem) clamp(0.7rem, 3vw, 1.5rem) calc(5.5rem + var(--player-h, 0px));
 }
 
 .cards-grid {
@@ -334,7 +387,8 @@ html, body {
 .row.hl { outline: 3px solid var(--accent); outline-offset: 2px; animation: tile-pop 1.8s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* ---- trends / analytics ---- */
-.trends {
+.trends,
+.day-view {
   position: fixed;
   inset: 56px 0 0 0;
   z-index: 18;
@@ -439,7 +493,7 @@ html, body {
 .collage-name {
   position: fixed;
   left: 50%;
-  bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
+  bottom: calc(max(1.1rem, env(safe-area-inset-bottom, 0px)) + var(--player-h, 0px));
   z-index: 12;
   max-width: min(90vw, 30rem);
   padding: 0.5rem 1rem;
@@ -470,10 +524,71 @@ html, body {
   pointer-events: none;
 }
 
+/* ---- mini audio player (docked pill) ---- */
+#player {
+  position: fixed;
+  left: 50%;
+  bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: min(94vw, 26rem);
+  padding: 0.45rem 0.7rem 0.5rem 0.45rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+}
+.player-toggle {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+}
+.player-toggle::before { content: "▶"; font-size: 0.72rem; margin-left: 2px; }
+#player.playing .player-toggle::before { content: "❚❚"; margin-left: 0; font-size: 0.62rem; }
+.player-info { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 0.1rem; }
+.player-title { font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-time { font-size: 0.66rem; color: var(--ink-soft); }
+.player-close {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.player-close:hover { color: var(--ink); }
+.player-bar {
+  position: absolute;
+  left: 0.9rem;
+  right: 2.4rem;
+  bottom: 3px;
+  height: 2px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.player-bar i { display: block; height: 100%; width: 0%; background: var(--accent); }
+
 /* ---- live ticker ---- */
 #ticker {
   position: fixed;
-  left: 0.9rem; bottom: 0.9rem;
+  left: 0.9rem;
+  bottom: calc(0.9rem + var(--player-h, 0px));
   z-index: 15;
   display: flex;
   flex-direction: column;
@@ -559,6 +674,32 @@ html, body {
   border-radius: 12px; margin: 1rem 0 0.8rem;
 }
 .sheet .meta { display: flex; gap: 1rem; color: var(--ink-soft); font-size: 0.85rem; margin-bottom: 0.8rem; }
+/* ---- species-detail mini-charts (30-day trend + hourly profile) ---- */
+.species-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+.species-chart {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem 0.4rem;
+}
+.species-chart h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.species-chart .chart-host { width: 100%; }
+.species-chart .loading { font-size: 0.78rem; margin: 0.4rem 0; }
+@media (max-width: 640px) {
+  .species-charts { grid-template-columns: 1fr; }
+}
 /* ---- plumage photo carousel (modal) ---- */
 .plumage { position: relative; margin: 0.4rem 0 1.1rem; }
 .plumage-head {
@@ -595,8 +736,33 @@ html, body {
 .clip { margin: 0; background: var(--bg); border-radius: 10px; padding: 0.5rem; }
 .clip img { width: 100%; border-radius: 6px; display: block; background: #222; }
 .clip .wave { width: 100%; height: 88px; display: block; border-radius: 6px; background: var(--card); }
+.spectro { position: relative; width: 100%; height: 88px; border-radius: 6px; overflow: hidden; background: #1a1a1a; }
+.spectro img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.spectro-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0%;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
 .clip figcaption { font-size: 0.72rem; color: var(--ink-soft); margin: 0.35rem 0; }
-.clip audio { width: 100%; height: 34px; }
+.play-btn {
+  width: 100%;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+.play-btn:hover { filter: brightness(1.06); }
+.play-btn.playing { background: var(--ink); }
 .links { display: flex; gap: 1rem; margin-top: 1.1rem; flex-wrap: wrap; align-items: center; }
 .links a { color: var(--accent); text-decoration: none; font-weight: 500; font-size: 0.9rem; }
 .links a:hover { text-decoration: underline; }
@@ -616,6 +782,72 @@ html, body {
 /* Lock the scrollable view behind an open dialog. */
 .has-modal #collage { overflow: hidden !important; }
 .loading { color: var(--ink-soft); }
+
+/* ---- status toast (transient errors / connectivity) ---- */
+#toast {
+  position: fixed;
+  top: calc(var(--bar-h, 64px) + 10px);
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(92vw, 30rem);
+  padding: 0.45rem 0.9rem;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-size: 0.84rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#toast.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast-act {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toast-act:hover { border-color: var(--accent); }
+
+/* First-load failure state (rendered into #collage in place of the skeleton). */
+.load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 4.5rem 1rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+.load-error p { margin: 0; }
+.load-error .retry {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+}
+.load-error .retry:hover { border-color: var(--accent); }
 
 /* ---- mobile / small screens (phones) ---- */
 @media (max-width: 640px) {
@@ -647,7 +879,8 @@ html, body {
   .dd-trigger { font-size: 0.72rem; padding: 0.3rem 0.52rem; }
 
   /* Analytics view starts below the taller wrapped header. */
-  .trends { top: calc(120px + env(safe-area-inset-top, 0px)); }
+  .trends,
+  .day-view { top: calc(120px + env(safe-area-inset-top, 0px)); }
 
   /* Live ticker stays clear of the notch / screen edge. */
   #ticker {
@@ -667,9 +900,26 @@ html, body {
   .row { grid-template-columns: 104px 1fr auto; gap: 0.8rem; }
   .row .thumb { width: 104px; height: 78px; }
 
-  /* Modal: use the screen, smaller carousel, single-column recordings. */
-  .modal { padding: 0.6rem; }
-  .sheet { padding: 1rem 1rem 1.2rem; max-height: 92vh; }
+  /* Modal becomes a bottom sheet on phones: full-width, anchored to the bottom
+     edge, sliding up. Focus trap and scroll lock behave exactly as before. */
+  .modal { padding: 0; place-items: end center; }
+  .sheet {
+    width: 100%;
+    max-height: 92dvh;
+    padding: 1rem 1rem calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    border-radius: 18px 18px 0 0;
+    animation: sheet-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Grab handle affordance at the top of the sheet. */
+  .sheet::before {
+    content: "";
+    display: block;
+    width: 2.4rem;
+    height: 4px;
+    margin: 0 auto 0.7rem;
+    border-radius: 999px;
+    background: var(--line);
+  }
   .sheet-head h2 { font-size: 1.3rem; }
   .plumage-slide { height: 300px; }
   .clips { grid-template-columns: 1fr; }
@@ -761,6 +1011,11 @@ html, body {
   100% { background-position: -200% 0; }
 }
 
+@keyframes sheet-up {
+  from { transform: translateY(28px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+
 /* ---- reduced motion: respect the OS setting ---- */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -787,6 +1042,29 @@ html, body {
 .trend-head .export { margin-left: 0; }
 
 .trend-card.wide { grid-column: 1 / -1; }
+
+/* Section headings inside the grid + header jump chips. */
+.trend-section {
+  grid-column: 1 / -1;
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.15rem;
+  margin: 0.9rem 0 -0.25rem;
+  scroll-margin-top: 0.5rem;
+}
+.trend-grid .trend-section:first-child { margin-top: 0; }
+.trend-head .jump { display: flex; flex-wrap: wrap; gap: 0.3rem; flex-basis: 100%; }
+.trend-head .jump button {
+  font: inherit;
+  font-size: 0.72rem;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.trend-head .jump button:hover { color: var(--ink); border-color: var(--accent); }
 .trend-card-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.7rem; }
 .trend-card-head h3 { margin: 0; font-size: 0.95rem; font-weight: 600; }
 .mini-toggle {
@@ -819,6 +1097,17 @@ html, body {
 .legend-item { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.74rem; color: var(--ink-soft); }
 .legend-item .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 
+/* weekday x hour punchcard */
+.punch { display: grid; grid-template-columns: minmax(84px, 140px) repeat(24, 1fr); gap: 2px; align-items: center; }
+.punch-row { display: contents; }
+.punch-label { font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 0.4rem; }
+.punch-cell { aspect-ratio: 1 / 1; min-height: 14px; display: flex; align-items: center; justify-content: center; }
+.punch-cell i { display: block; border-radius: 50%; background: var(--accent); }
+.punch-hours .punch-hr { font-size: 0.58rem; color: var(--ink-soft); text-align: center; }
+
+/* shared small caption under a chart (e.g. dawn-chorus sunrise legend) */
+.chart-caption { margin: 0.4rem 0 0; font-size: 0.72rem; color: var(--ink-soft); }
+
 /* co-occurrence matrix */
 .cooc { display: grid; grid-template-columns: minmax(86px, 150px) repeat(var(--n), 1fr); gap: 2px; align-items: center; }
 .cooc-corner, .cooc-colh { font-size: 0.6rem; color: var(--ink-soft); text-align: center; }
@@ -836,6 +1125,19 @@ html, body {
 .badge.returned { background: #b5832a; color: #fff; }
 .badge.uncommon { background: #7a6a3a; color: #fff; }
 
+/* per-species sparkline strip */
+.sparks { display: flex; flex-direction: column; gap: 0.5rem; }
+.spark-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr 2.4rem 3.6rem;
+  align-items: center;
+  gap: 0.7rem;
+}
+.spark-host { display: block; width: 100%; }
+.spark-host svg { display: block; width: 100%; height: 26px; }
+.spark-n { font-size: 0.8rem; color: var(--ink-soft); text-align: right; }
+.delta { font-size: 0.74rem; color: var(--ink-soft); text-align: right; white-space: nowrap; }
+
 /* calendar heatmap */
 .cal { display: grid; grid-template-rows: repeat(7, 13px); grid-auto-flow: column; grid-auto-columns: 13px; gap: 3px; justify-content: start; overflow-x: auto; padding-bottom: 2px; }
 .cal-day { width: 13px; height: 13px; border-radius: 2px; }
@@ -844,7 +1146,95 @@ html, body {
 @media (max-width: 640px) {
   .trend-card.wide { overflow-x: auto; }
   .heatmap { grid-template-columns: 70px repeat(24, 14px); }
+  .punch { grid-template-columns: 70px repeat(24, 14px); }
   .cooc { grid-template-columns: 80px repeat(var(--n), 18px); }
   .anom-row { grid-template-columns: 4.6rem 1fr; }
   .anom-detail { grid-column: 2; text-align: left; }
+  .spark-row { grid-template-columns: 6.5rem 1fr 2rem 3.2rem; gap: 0.4rem; }
+}
+
+/* ===== Day explorer (#/day) ===== */
+.day-head { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
+.day-head h2 { font-family: "Fraunces", serif; margin: 0; font-size: 1.4rem; flex: 1; text-align: center; }
+.day-nav {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.day-nav:hover { border-color: var(--accent); }
+.day-nav:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.day-strip { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin-bottom: 1.4rem; padding: 0 0.1rem; }
+.day-bar {
+  flex: 1;
+  height: var(--h, 3%);
+  min-height: 2px;
+  background: var(--accent);
+  border: none;
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.day-bar:hover { opacity: 1; }
+.day-bar:disabled { background: var(--line); cursor: default; }
+
+.day-groups { display: flex; flex-direction: column; gap: 1.4rem; max-width: 720px; margin: 0 auto; }
+.day-hour h3 { font-family: "Fraunces", serif; font-size: 1rem; margin: 0 0 0.5rem; color: var(--ink-soft); scroll-margin-top: 0.5rem; }
+.day-rows { display: flex; flex-direction: column; gap: 0.4rem; }
+.day-row {
+  display: grid;
+  grid-template-columns: 48px 4.5rem 1fr 3rem 2.2rem;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+}
+.day-thumb { width: 48px; height: 36px; object-fit: cover; border-radius: 6px; background: #1a1a1a; }
+.day-thumb.noimg { background: linear-gradient(150deg, var(--bg2), var(--line)); }
+.day-time { font-size: 0.76rem; color: var(--ink-soft); white-space: nowrap; }
+.day-sp {
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.day-sp:hover { color: var(--accent); }
+.day-conf { font-size: 0.76rem; color: var(--ink-soft); text-align: right; }
+.day-play {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+.day-play.noclip { background: var(--line); cursor: default; }
+.day-play.playing { background: var(--ink); }
+
+@media (max-width: 640px) {
+  .day-row { grid-template-columns: 30px 4.6rem 1fr 2rem; gap: 0.4rem; padding: 0.4rem 0.5rem; }
+  .day-row .day-conf { display: none; }
+  .day-thumb { width: 30px; height: 24px; }
+  .day-time { font-size: 0.7rem; }
 }

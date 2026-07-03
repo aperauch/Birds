@@ -12,15 +12,42 @@ import {
   statsCooccurrence,
   statsDaily,
   statsDiel,
+  statsFirstLast,
+  statsPunchcard,
   statsRichness,
   type Anomaly,
   type CoocPair,
   type CoocSpecies,
   type DielSpecies,
+  type FirstLastDay,
+  type SunDay,
 } from "./api";
 import type { Species } from "./types";
-
-const NS = "http://www.w3.org/2000/svg";
+import { agoDays, escapeHtml, fmtDate, hourLabel } from "./format";
+import { colorFor } from "./color";
+import {
+  addDays,
+  computeRecords,
+  easternMinutesOfDay,
+  hhmm,
+  pctDelta,
+  shannonByDay,
+  sparkSeries,
+  speciesWeekDeltas,
+  speciesWeekPair,
+  trailingWeeks,
+} from "./analytics";
+import {
+  barChart,
+  chartHost,
+  CHART_H as H,
+  CHART_PAD as PAD,
+  el,
+  lineChart,
+  spark,
+  svg,
+  title,
+} from "./charts";
 
 const RANGES: { label: string; days: number }[] = [
   { label: "7D", days: 7 },
@@ -31,45 +58,6 @@ const RANGES: { label: string; days: number }[] = [
 ];
 let rangeDays = 30;
 
-// --- helpers ----------------------------------------------------------------
-function svg(w: number, h: number): SVGSVGElement {
-  const s = document.createElementNS(NS, "svg");
-  s.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  s.setAttribute("width", "100%");
-  s.classList.add("chart");
-  return s;
-}
-
-// Render an SVG chart at the host's REAL pixel width so 1 user unit = 1px and
-// the default (uniform) aspect ratio keeps text from stretching. Re-renders on
-// resize; height stays fixed (the viewBox is `width × H`, so height = H px).
-function chartHost(build: (w: number) => SVGSVGElement): HTMLElement {
-  const host = document.createElement("div");
-  host.className = "chart-host";
-  let last = 0;
-  const paint = (): void => {
-    const w = Math.round(host.clientWidth);
-    if (w < 80 || w === last) return;
-    last = w;
-    host.replaceChildren(build(w));
-  };
-  new ResizeObserver(paint).observe(host);
-  requestAnimationFrame(paint);
-  return host;
-}
-
-function el(tag: string, attrs: Record<string, string | number>): SVGElement {
-  const e = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-  return e;
-}
-
-function title(parent: SVGElement | HTMLElement, text: string): void {
-  const t = document.createElementNS(NS, "title");
-  t.textContent = text;
-  parent.appendChild(t);
-}
-
 function card(titleText: string, body: SVGElement | HTMLElement, wide = false): HTMLElement {
   const c = document.createElement("section");
   c.className = wide ? "trend-card wide" : "trend-card";
@@ -79,92 +67,27 @@ function card(titleText: string, body: SVGElement | HTMLElement, wide = false): 
   return c;
 }
 
-function hueFor(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+// The page groups its cards under a few section headings; the header offers
+// matching jump chips. Buttons + scrollIntoView (never location.hash — that
+// would knock the router off the #/trends route).
+const SECTIONS: { id: string; label: string }[] = [
+  { id: "t-overview", label: "Overview" },
+  { id: "t-rhythm", label: "Daily rhythm" },
+  { id: "t-species", label: "Species" },
+  { id: "t-history", label: "History" },
+];
+
+function sectionHead(id: string): HTMLElement {
+  const s = SECTIONS.find((x) => x.id === id)!;
+  const h = document.createElement("h2");
+  h.className = "trend-section";
+  h.id = s.id;
+  h.textContent = s.label;
   return h;
 }
-function colorFor(sci: string): string {
-  return sci ? `hsl(${hueFor(sci)} 60% 45%)` : "#9b8e76"; // "" => Other species
-}
-function hourLabel(h: number): string {
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr}${h < 12 ? "a" : "p"}`;
-}
-function fmtDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-function ago(ts: number): string {
-  const d = Math.max(0, Math.round((Date.now() / 1000 - ts) / 86400));
-  return d === 0 ? "today" : d === 1 ? "1 day ago" : `${d} days ago`;
-}
+
 function sciSpan(sci: string, com: string): string {
   return `<span class="lnk" data-sci="${sci.replace(/"/g, "&quot;")}" role="link" tabindex="0">${escapeHtml(com)}</span>`;
-}
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-  );
-}
-
-const W = 640;
-const H = 200;
-const PAD = { l: 34, r: 12, t: 12, b: 22 };
-
-function lineChart(points: { label: string; value: number }[], color: string, w = W): SVGSVGElement {
-  const s = svg(w, H);
-  const max = Math.max(1, ...points.map((p) => p.value));
-  const iw = w - PAD.l - PAD.r;
-  const ih = H - PAD.t - PAD.b;
-  const x = (i: number) => PAD.l + (points.length <= 1 ? 0 : (i / (points.length - 1)) * iw);
-  const y = (v: number) => PAD.t + ih - (v / max) * ih;
-  s.append(el("line", { x1: PAD.l, y1: PAD.t + ih, x2: PAD.l + iw, y2: PAD.t + ih, class: "axis" }));
-  s.append(el("line", { x1: PAD.l, y1: PAD.t, x2: PAD.l, y2: PAD.t + ih, class: "axis" }));
-  const ylabel = el("text", { x: 2, y: PAD.t + 8, class: "tick" });
-  ylabel.textContent = String(max);
-  s.append(ylabel);
-  if (points.length > 0) {
-    const d = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
-    const area = `${d} L${x(points.length - 1).toFixed(1)},${PAD.t + ih} L${x(0).toFixed(1)},${PAD.t + ih} Z`;
-    s.append(el("path", { d: area, fill: color, "fill-opacity": "0.14", stroke: "none" }));
-    s.append(el("path", { d, fill: "none", stroke: color, "stroke-width": 2 }));
-    const first = el("text", { x: PAD.l, y: H - 6, class: "tick" });
-    first.textContent = points[0]!.label.slice(5);
-    const last = el("text", { x: PAD.l + iw, y: H - 6, class: "tick", "text-anchor": "end" });
-    last.textContent = points[points.length - 1]!.label.slice(5);
-    s.append(first, last);
-  }
-  return s;
-}
-
-function barChart(values: number[], labels: string[], color: string, every = 6, w = W): SVGSVGElement {
-  const s = svg(w, H);
-  const max = Math.max(1, ...values);
-  const iw = w - PAD.l - PAD.r;
-  const ih = H - PAD.t - PAD.b;
-  const bw = iw / values.length;
-  s.append(el("line", { x1: PAD.l, y1: PAD.t + ih, x2: PAD.l + iw, y2: PAD.t + ih, class: "axis" }));
-  values.forEach((v, i) => {
-    const bh = (v / max) * ih;
-    const r = el("rect", {
-      x: PAD.l + i * bw + 1,
-      y: PAD.t + ih - bh,
-      width: Math.max(1, bw - 2),
-      height: bh,
-      fill: color,
-      rx: 1.5,
-    });
-    title(r, `${labels[i]}: ${v}`);
-    s.append(r);
-  });
-  labels.forEach((lab, i) => {
-    if (i % every === 0) {
-      const t = el("text", { x: PAD.l + i * bw + bw / 2, y: H - 6, class: "tick", "text-anchor": "middle" });
-      t.textContent = lab;
-      s.append(t);
-    }
-  });
-  return s;
 }
 
 function topList(items: { sci_name: string; com_name: string; count: number }[]): HTMLElement {
@@ -178,6 +101,43 @@ function topList(items: { sci_name: string; com_name: string; count: number }[])
       <span class="top-bar"><i style="width:${(it.count / max) * 100}%"></i></span>
       <span class="top-n">${it.count}</span>`;
     wrap.append(row);
+  }
+  return wrap;
+}
+
+interface SeriesRow {
+  date: string;
+  sci_name: string;
+  com_name: string;
+  count: number;
+}
+
+function sparklinesCard(
+  rows: SeriesRow[],
+  top: { sci_name: string; com_name: string; count: number }[],
+  from: string,
+  today: string,
+  showDelta: boolean,
+): HTMLElement {
+  const deltas = speciesWeekDeltas(rows, today);
+  const wrap = document.createElement("div");
+  wrap.className = "sparks";
+  for (const t of top.slice(0, 10)) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "spark-row";
+    const pair = deltas.get(t.sci_name);
+    const pct = showDelta && pair ? pctDelta(pair.thisWeek, pair.lastWeek) : null;
+    // Neutral ink for the deltas — more calls isn't "good", fewer isn't "bad".
+    const deltaHtml =
+      pct === null
+        ? `<span class="delta"></span>`
+        : `<span class="delta" title="calls this week vs last">${pct > 0 ? "▲" : pct < 0 ? "▼" : "◆"} ${Math.abs(pct)}%</span>`;
+    rowEl.innerHTML = `${sciSpan(t.sci_name, t.com_name)}<span class="spark-host"></span><span class="spark-n">${t.count}</span>${deltaHtml}`;
+    const values = sparkSeries(rows, t.sci_name, from, today);
+    const sv = spark(values, colorFor(t.sci_name));
+    title(sv, `${t.com_name} — ${t.count} calls, daily trend`);
+    rowEl.querySelector(".spark-host")?.append(sv);
+    wrap.append(rowEl);
   }
   return wrap;
 }
@@ -213,7 +173,7 @@ function heatmap(species: DielSpecies[], normalize: boolean): HTMLElement {
     row.className = "hm-row";
     const cells = s.hours
       .map((n, h) => {
-        const bg = n === 0 ? "" : ` style="background:rgba(138,90,43,${(0.12 + 0.88 * (n / rowMax)).toFixed(3)})"`;
+        const bg = n === 0 ? "" : ` style="background:rgb(var(--heat) / ${(0.12 + 0.88 * (n / rowMax)).toFixed(3)})"`;
         return `<span class="hm-cell"${bg} title="${escapeHtml(s.com_name)} · ${hourLabel(h)}–${hourLabel((h + 1) % 24)}: ${n} call${n === 1 ? "" : "s"}"></span>`;
       })
       .join("");
@@ -250,6 +210,102 @@ function dielCard(species: DielSpecies[]): HTMLElement {
   return c;
 }
 
+// --- weekday x hour punchcard -------------------------------------------------
+// SQLite's %w is 0=Sun..6=Sat; reordered to Mon..Sun to match the existing
+// "By day of week" bar chart.
+const DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function punchcard(matrix: number[][]): HTMLElement {
+  const max = Math.max(1, ...matrix.flat());
+  const grid = document.createElement("div");
+  grid.className = "punch";
+  const head = document.createElement("div");
+  head.className = "punch-row punch-hours";
+  head.innerHTML = `<span class="punch-label"></span>${Array.from({ length: 24 })
+    .map((_, h) => `<span class="punch-hr">${h % 6 === 0 ? hourLabel(h) : ""}</span>`)
+    .join("")}`;
+  grid.append(head);
+  DOW_ORDER.forEach((dow, i) => {
+    const row = document.createElement("div");
+    row.className = "punch-row";
+    const cells = (matrix[dow] ?? [])
+      .map((n, h) => {
+        if (n === 0) return `<span class="punch-cell"></span>`;
+        // sqrt scaling keeps low-volume hours visibly non-zero.
+        const pct = (14 + 82 * Math.sqrt(n / max)).toFixed(0);
+        const label = `${DOW_LABELS[i]} ${hourLabel(h)}–${hourLabel((h + 1) % 24)}: ${n} call${n === 1 ? "" : "s"}`;
+        return `<span class="punch-cell"><i style="width:${pct}%;height:${pct}%" title="${escapeHtml(label)}"></i></span>`;
+      })
+      .join("");
+    row.innerHTML = `<span class="punch-label">${DOW_LABELS[i]}</span>${cells}`;
+    grid.append(row);
+  });
+  return grid;
+}
+
+// --- dawn chorus: first-call time-of-day per date, with a sunrise overlay ----
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function dawnChorusSvg(items: FirstLastDay[], sun: SunDay[] | undefined, w: number): SVGSVGElement {
+  const s = svg(w, H);
+  const iw = w - PAD.l - PAD.r;
+  const ih = H - PAD.t - PAD.b;
+  const n = items.length;
+  const x = (i: number) => PAD.l + (n <= 1 ? 0 : (i / (n - 1)) * iw);
+  // Fixed 4am-10am window: covers seasonal dawn-chorus drift without letting a
+  // stray late "first call" (e.g. a quiet day) blow out the scale.
+  const MIN_M = 240;
+  const MAX_M = 600;
+  const y = (min: number) => PAD.t + ih - ((clamp(min, MIN_M, MAX_M) - MIN_M) / (MAX_M - MIN_M)) * ih;
+  s.append(el("line", { x1: PAD.l, y1: PAD.t + ih, x2: PAD.l + iw, y2: PAD.t + ih, class: "axis" }));
+  s.append(el("line", { x1: PAD.l, y1: PAD.t, x2: PAD.l, y2: PAD.t + ih, class: "axis" }));
+  for (const m of [MIN_M, (MIN_M + MAX_M) / 2, MAX_M]) {
+    const t = el("text", { x: 2, y: y(m) + 3, class: "tick" });
+    t.textContent = hhmm(m);
+    s.append(t);
+  }
+  if (sun?.length) {
+    const byDate = new Map(sun.map((d) => [d.date, d]));
+    const pts = items.flatMap((it, i) => {
+      const sd = byDate.get(it.date);
+      return sd ? [{ x: x(i), y: y(easternMinutesOfDay(sd.sunrise)) }] : [];
+    });
+    if (pts.length) {
+      const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+      s.append(
+        el("path", {
+          d,
+          style: "fill:none;stroke:var(--chart-line-3)",
+          "stroke-width": 1.5,
+          "stroke-dasharray": "3,3",
+        }),
+      );
+    }
+  }
+  for (const [i, it] of items.entries()) {
+    const min = easternMinutesOfDay(it.first_ts);
+    const c = el("circle", { cx: x(i), cy: y(min), r: 3, style: "fill:var(--chart-line-1)" });
+    title(c, `${it.date} — first call ${hhmm(min)}`);
+    s.append(c);
+  }
+  return s;
+}
+
+function dawnChorusCard(items: FirstLastDay[], sun: SunDay[] | undefined): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.append(chartHost((w) => dawnChorusSvg(items, sun, w)));
+  if (sun?.length) {
+    const cap = document.createElement("p");
+    cap.className = "chart-caption";
+    cap.textContent = "Dashed line = sunrise";
+    wrap.append(cap);
+  }
+  return wrap;
+}
+
 // --- calls by hour, stacked by species --------------------------------------
 function stackedSvg(species: DielSpecies[], w: number): SVGSVGElement {
   const hourTotals = Array.from({ length: 24 }, (_, h) =>
@@ -271,12 +327,14 @@ function stackedSvg(species: DielSpecies[], w: number): SVGSVGElement {
       if (v <= 0) continue;
       const segH = (v / max) * ih;
       yCursor -= segH;
+      // colorFor() contains var() — presentation attributes don't resolve
+      // custom properties, so the fill must go through `style`.
       const r = el("rect", {
         x: PAD.l + h * bw + 0.5,
         y: yCursor,
         width: Math.max(1, bw - 1),
         height: segH,
-        fill: colorFor(sp.sci_name),
+        style: `fill:${colorFor(sp.sci_name)}`,
       });
       title(r, `${sp.com_name} · ${hourLabel(h)}: ${v}`);
       s.append(r);
@@ -341,7 +399,7 @@ function coocMatrix(species: CoocSpecies[], pairs: CoocPair[]): HTMLElement {
         html += `<span class="cooc-cell diag" title="${escapeHtml(species[i]!.com_name)}: ${species[i]!.buckets} active windows"></span>`;
       } else {
         const v = m[i]![j]!;
-        const bg = v === 0 ? "" : ` style="background:rgba(74,138,61,${(0.12 + 0.88 * (v / max)).toFixed(3)})"`;
+        const bg = v === 0 ? "" : ` style="background:rgb(var(--heat-2) / ${(0.12 + 0.88 * (v / max)).toFixed(3)})"`;
         html += `<span class="cooc-cell"${bg} title="${escapeHtml(species[i]!.com_name)} + ${escapeHtml(species[j]!.com_name)}: ${v} shared windows"></span>`;
       }
     }
@@ -370,9 +428,9 @@ function anomaliesTable(items: Anomaly[]): HTMLElement {
     .map((a) => {
       const detail =
         a.type === "new"
-          ? `first seen ${ago(a.first_seen)}`
+          ? `first seen ${agoDays(a.first_seen)}`
           : a.type === "returned"
-            ? `back after ~${a.gap_days}d · last ${ago(a.last_seen)}`
+            ? `back after ~${a.gap_days}d · last ${agoDays(a.last_seen)}`
             : `${a.total_count} call${a.total_count === 1 ? "" : "s"} · ${a.days_seen} day${a.days_seen === 1 ? "" : "s"}`;
       return `<div class="anom-row">
         <span class="badge ${a.type}">${labels[a.type]}</span>
@@ -384,6 +442,73 @@ function anomaliesTable(items: Anomaly[]): HTMLElement {
   return wrap;
 }
 
+// --- records & streaks --------------------------------------------------------
+function recordsCard(
+  daily: { date: string; count: number }[],
+  rows: SeriesRow[],
+  today: string,
+): HTMLElement {
+  const r = computeRecords(daily, rows, today);
+  const tiles: { k: string; v: string; sub?: string }[] = [
+    {
+      k: "busiest day",
+      v: r.busiest ? fmtDate(Date.parse(`${r.busiest.date}T12:00:00Z`) / 1000) : "—",
+      sub: r.busiest ? `${r.busiest.count} calls` : "",
+    },
+    {
+      k: "most diverse day",
+      v: r.mostDiverse ? fmtDate(Date.parse(`${r.mostDiverse.date}T12:00:00Z`) / 1000) : "—",
+      sub: r.mostDiverse ? `${r.mostDiverse.species} species` : "",
+    },
+    {
+      k: "longest streak",
+      v: r.longestStreak ? `${r.longestStreak.streak.len}d` : "—",
+      sub: r.longestStreak ? r.longestStreak.com_name : "",
+    },
+    {
+      k: "current streak",
+      v: r.currentStreak ? `${r.currentStreak.len}d` : "—",
+      sub: r.currentStreak ? r.currentStreak.com_name : "none active",
+    },
+  ];
+  return statTiles(tiles);
+}
+
+// --- week vs week --------------------------------------------------------------
+function weekTile(label: string, cur: number, prev: number): string {
+  const pct = pctDelta(cur, prev);
+  const sub =
+    pct === null ? "no prior week" : `${pct > 0 ? "▲" : pct < 0 ? "▼" : "◆"} ${Math.abs(pct)}% vs last week`;
+  return `<div class="tile-stat"><span class="v">${cur.toLocaleString()}</span><span class="k">${escapeHtml(label)}</span><span class="s">${escapeHtml(sub)}</span></div>`;
+}
+
+function weekOverWeekCard(
+  daily: { date: string; count: number }[],
+  rows: SeriesRow[],
+  today: string,
+  haveTwoWeeks: boolean,
+): HTMLElement {
+  if (!haveTwoWeeks) return empty("Needs two weeks of history to compare.");
+  const calls = trailingWeeks(daily, today);
+  const activeSpecies = speciesWeekPair(rows, today);
+  const deltas = speciesWeekDeltas(rows, today);
+  let newSpecies = 0;
+  for (const pair of deltas.values()) if (pair.thisWeek > 0 && pair.lastWeek === 0) newSpecies += 1;
+  const wrap = document.createElement("div");
+  wrap.className = "trend-tiles";
+  wrap.innerHTML =
+    weekTile("calls this week", calls.thisWeek, calls.lastWeek) +
+    weekTile("active species", activeSpecies.thisWeek, activeSpecies.lastWeek) +
+    `<div class="tile-stat"><span class="v">${newSpecies}</span><span class="k">new this week</span></div>`;
+  return wrap;
+}
+
+// --- diversity (Shannon H') ----------------------------------------------------
+function diversityCard(rows: SeriesRow[]): HTMLElement {
+  const points = shannonByDay(rows).map((d) => ({ label: d.date, value: d.h }));
+  return chartHost((w) => lineChart(points, "var(--chart-line-2)", w));
+}
+
 // --- life-list growth (cumulative distinct species) -------------------------
 function lifeList(species: Species[]): HTMLElement {
   const firsts = species
@@ -391,7 +516,7 @@ function lifeList(species: Species[]): HTMLElement {
     .filter((t) => t > 0)
     .sort((a, b) => a - b);
   const points = firsts.map((ts, i) => ({ label: new Date(ts * 1000).toISOString().slice(0, 10), value: i + 1 }));
-  return chartHost((w) => lineChart(points, "#2850a5", w));
+  return chartHost((w) => lineChart(points, "var(--chart-line-3)", w));
 }
 
 // --- calendar heatmap (detections per day) ----------------------------------
@@ -413,7 +538,7 @@ function calendar(daily: { date: string; count: number }[]): HTMLElement {
     const a = n === 0 ? 0 : 0.12 + 0.88 * (n / max);
     const cell = document.createElement("span");
     cell.className = "cal-day";
-    cell.style.background = n === 0 ? "var(--line)" : `rgba(138,90,43,${a.toFixed(3)})`;
+    cell.style.background = n === 0 ? "var(--line)" : `rgb(var(--heat) / ${a.toFixed(3)})`;
     cell.title = `${iso}: ${n} call${n === 1 ? "" : "s"}`;
     grid.append(cell);
     cur.setDate(cur.getDate() + 1);
@@ -432,7 +557,7 @@ function dayOfWeek(daily: { date: string; count: number }[]): HTMLElement {
   const order = [1, 2, 3, 4, 5, 6, 0];
   const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const vals = order.map((i) => dow[i] ?? 0);
-  return chartHost((w) => barChart(vals, labels, "#7a6a3a", 1, w));
+  return chartHost((w) => barChart(vals, labels, "var(--chart-line-4)", 1, w));
 }
 
 // --- main render ------------------------------------------------------------
@@ -444,7 +569,8 @@ export async function renderTrends(container: HTMLElement): Promise<void> {
   if (!container.querySelector(".trend-head")) {
     container.innerHTML = `<div class="trend-head"><h2>Trends</h2>
       <nav class="range" aria-label="time range"></nav>
-      <a class="export" href="/api/export.csv" download>Export CSV ↓</a></div>
+      <a class="export" href="/api/export.csv" download>Export CSV ↓</a>
+      <nav class="jump" aria-label="sections"></nav></div>
       <div class="trend-grid"><p class="loading">Loading analytics…</p></div>`;
     const range = container.querySelector(".range") as HTMLElement;
     for (const r of RANGES) {
@@ -458,6 +584,18 @@ export async function renderTrends(container: HTMLElement): Promise<void> {
         void draw(container);
       });
       range.append(b);
+    }
+    const jump = container.querySelector(".jump") as HTMLElement;
+    const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    for (const s of SECTIONS) {
+      const b = document.createElement("button");
+      b.textContent = s.label;
+      b.addEventListener("click", () => {
+        container
+          .querySelector(`#${s.id}`)
+          ?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+      });
+      jump.append(b);
     }
   }
   // Clickable species names (delegated, attached once).
@@ -484,13 +622,15 @@ async function draw(container: HTMLElement): Promise<void> {
   inFlight = true;
   const grid = container.querySelector(".trend-grid") as HTMLElement;
   try {
-    const [daily, richness, diel, cooc, anoms, species] = await Promise.all([
+    const [daily, richness, diel, cooc, anoms, species, punch, firstLast] = await Promise.all([
       statsDaily(rangeDays),
       statsRichness(rangeDays),
       statsDiel(rangeDays, 12),
       statsCooccurrence(rangeDays, 10),
       statsAnomalies(Math.min(rangeDays, 365)),
       listSpecies(),
+      statsPunchcard(rangeDays),
+      statsFirstLast(Math.min(rangeDays, 365)),
     ]);
 
     const totalCalls = daily.daily.reduce((s, d) => s + d.count, 0);
@@ -498,8 +638,19 @@ async function draw(container: HTMLElement): Promise<void> {
     const busiestDay = daily.daily.reduce((m, d) => (d.count > m.count ? d : m), { date: "", count: -1 });
     const newCount = anoms.items.filter((a) => a.type === "new").length;
 
+    // Actual data genesis (earliest species.first_seen), independent of the
+    // selected range — gates the week-over-week card and sparkline deltas so
+    // they never compare against padding-zero history.
+    const today = new Date().toISOString().slice(0, 10);
+    const genesisTs = species.species.reduce((m, s) => Math.min(m, s.first_seen), Infinity);
+    const genesisDate = Number.isFinite(genesisTs)
+      ? new Date(genesisTs * 1000).toISOString().slice(0, 10)
+      : today;
+    const haveTwoWeeks = addDays(today, -13) >= genesisDate;
+
     grid.innerHTML = "";
     grid.append(
+      sectionHead("t-overview"),
       card(
         "Overview",
         statTiles([
@@ -511,6 +662,13 @@ async function draw(container: HTMLElement): Promise<void> {
         ]),
         true,
       ),
+      card("Records & streaks", recordsCard(daily.daily, daily.series, today), true),
+      card(
+        "This week vs last week",
+        weekOverWeekCard(daily.daily, daily.series, today, haveTwoWeeks),
+        true,
+      ),
+      sectionHead("t-rhythm"),
       dielCard(diel.species),
       card(
         "Calls by hour (by species)",
@@ -518,9 +676,30 @@ async function draw(container: HTMLElement): Promise<void> {
         true,
       ),
       card(
-        "Heard together (co-occurrence)",
-        cooc.species.length >= 2 ? coocMatrix(cooc.species, cooc.pairs) : empty("Not enough data yet."),
+        "Weekly punchcard — Eastern time",
+        punch.matrix.some((row) => row.some((n) => n > 0)) ? punchcard(punch.matrix) : empty("No calls in this range."),
         true,
+      ),
+      card(
+        "Dawn chorus — first call of the day",
+        firstLast.items.length ? dawnChorusCard(firstLast.items, firstLast.sun) : empty("No detections yet."),
+        true,
+      ),
+      sectionHead("t-species"),
+      card(
+        "Species trends",
+        daily.top_species.length
+          ? sparklinesCard(daily.series, daily.top_species, daily.from, today, haveTwoWeeks)
+          : empty("No species yet."),
+        true,
+      ),
+      card(
+        "Top species",
+        daily.top_species.length ? topList(daily.top_species) : empty("No species yet."),
+      ),
+      card(
+        "Life-list growth",
+        species.species.length ? lifeList(species.species) : empty("No species yet."),
       ),
       card(
         "New & notable",
@@ -528,20 +707,26 @@ async function draw(container: HTMLElement): Promise<void> {
         true,
       ),
       card(
+        "Heard together (co-occurrence)",
+        cooc.species.length >= 2 ? coocMatrix(cooc.species, cooc.pairs) : empty("Not enough data yet."),
+        true,
+      ),
+      sectionHead("t-history"),
+      card(
         "Detections per day",
         daily.daily.length
-          ? chartHost((w) => lineChart(daily.daily.map((d) => ({ label: d.date, value: d.count })), "#8a5a2b", w))
+          ? chartHost((w) => lineChart(daily.daily.map((d) => ({ label: d.date, value: d.count })), "var(--chart-line-1)", w))
           : empty("No detections yet."),
       ),
       card(
         "Species richness per day",
         richness.richness.length
-          ? chartHost((w) => lineChart(richness.richness.map((d) => ({ label: d.date, value: d.species })), "#4a8a3d", w))
+          ? chartHost((w) => lineChart(richness.richness.map((d) => ({ label: d.date, value: d.species })), "var(--chart-line-2)", w))
           : empty("No species yet."),
       ),
       card(
-        "Life-list growth",
-        species.species.length ? lifeList(species.species) : empty("No species yet."),
+        "Species diversity (Shannon)",
+        daily.series.length ? diversityCard(daily.series) : empty("No detections yet."),
       ),
       card(
         "Activity calendar",
@@ -551,10 +736,6 @@ async function draw(container: HTMLElement): Promise<void> {
       card(
         "By day of week",
         daily.daily.length ? dayOfWeek(daily.daily) : empty("No detections yet."),
-      ),
-      card(
-        "Top species",
-        daily.top_species.length ? topList(daily.top_species) : empty("No species yet."),
       ),
     );
   } catch {

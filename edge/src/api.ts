@@ -6,7 +6,8 @@ import { mediaUrl } from "./media";
 import { ebirdUrl, resolveEbirdCode } from "./ebird";
 import { getCubInfo, type PlumagePhoto } from "./plumage";
 import { getCachedMacaulay } from "./macaulay";
-import { easternHourSql } from "./tz";
+import { easternHourSql, easternOffsetSql } from "./tz";
+import { sunTimes } from "./sun";
 
 export const api = new Hono<{ Bindings: Bindings }>();
 
@@ -258,21 +259,24 @@ api.get("/stats/hourly", async (c) => {
 });
 
 // Diel activity: per-species call counts by Eastern hour-of-day over a window.
-// Powers the species×hour heatmap and the stacked "calls by hour" chart.
+// Powers the species×hour heatmap and the stacked "calls by hour" chart. An
+// optional `sci` narrows to a single species' 24h profile (species-detail
+// mini-chart) and skips the "Other species" fold below.
 api.get("/stats/diel", async (c) => {
   const now = Math.floor(Date.now() / 1000);
   const days = Math.min(Math.max(Number(c.req.query("days") ?? "30"), 1), 3650);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? "12"), 1), 30);
   const from = Number(c.req.query("from") ?? now - days * 86400);
   const to = Number(c.req.query("to") ?? now);
+  const sci = c.req.query("sci") || null;
   const hourExpr = easternHourSql(from, to);
 
   const { results } = await c.env.DB.prepare(
     `SELECT sci_name, MAX(com_name) AS com_name, ${hourExpr} AS hour, COUNT(*) AS n
-       FROM detections WHERE ts >= ? AND ts < ?
+       FROM detections WHERE ts >= ? AND ts < ?${sci ? " AND sci_name = ?" : ""}
       GROUP BY sci_name, hour`,
   )
-    .bind(from, to)
+    .bind(...(sci ? [from, to, sci] : [from, to]))
     .all<{ sci_name: string; com_name: string; hour: number; n: number }>();
   const rows = results ?? [];
 
@@ -292,7 +296,8 @@ api.get("/stats/diel", async (c) => {
     .sort((a, b) => b.total - a.total);
   const top = all.slice(0, limit);
   // Fold the remaining species into an "Other" row so totals still add up.
-  if (all.length > limit) {
+  // Skipped when filtering to one species — there's nothing left to fold.
+  if (!sci && all.length > limit) {
     const other = { sci_name: "", com_name: "Other species", total: 0, hours: new Array(24).fill(0) as number[] };
     for (const s of all.slice(limit)) {
       other.total += s.total;
@@ -411,6 +416,67 @@ api.get("/stats/anomalies", async (c) => {
 
   c.header("Cache-Control", "public, max-age=120");
   return c.json({ days, items });
+});
+
+// Weekday x Eastern-hour punchcard: matrix[dow][hour], dow 0=Sun..6=Sat
+// (SQLite %w convention — the client reorders for Mon-first display).
+api.get("/stats/punchcard", async (c) => {
+  const now = Math.floor(Date.now() / 1000);
+  const days = Math.min(Math.max(Number(c.req.query("days") ?? "30"), 1), 3650);
+  const from = Number(c.req.query("from") ?? now - days * 86400);
+  const to = Number(c.req.query("to") ?? now);
+  const offset = easternOffsetSql(from, to);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%w', ts, 'unixepoch', ${offset}) AS INTEGER) AS dow,
+            ${easternHourSql(from, to)} AS hour,
+            COUNT(*) AS n
+       FROM detections WHERE ts >= ? AND ts < ?
+      GROUP BY dow, hour`,
+  )
+    .bind(from, to)
+    .all<{ dow: number; hour: number; n: number }>();
+
+  const matrix: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0) as number[]);
+  for (const r of results ?? []) {
+    if (r.dow == null || r.hour == null) continue;
+    matrix[r.dow]![r.hour] = r.n;
+  }
+  c.header("Cache-Control", "public, max-age=120");
+  return c.json({ from, to, days, matrix });
+});
+
+// Dawn-chorus onset: per Eastern-date first/last detection instant, optionally
+// paired with that date's sunrise/sunset (only when SITE_LAT/SITE_LON secrets
+// are set — coordinates themselves are never returned, only derived times).
+api.get("/stats/firstlast", async (c) => {
+  const now = Math.floor(Date.now() / 1000);
+  const days = Math.min(Math.max(Number(c.req.query("days") ?? "60"), 1), 365);
+  const from = Number(c.req.query("from") ?? now - days * 86400);
+  const to = Number(c.req.query("to") ?? now);
+  const dateExpr = `strftime('%Y-%m-%d', ts, 'unixepoch', ${easternOffsetSql(from, to)})`;
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT ${dateExpr} AS date, MIN(ts) AS first_ts, MAX(ts) AS last_ts
+       FROM detections WHERE ts >= ? AND ts < ?
+      GROUP BY date ORDER BY date ASC`,
+  )
+    .bind(from, to)
+    .all<{ date: string; first_ts: number; last_ts: number }>();
+  const items = results ?? [];
+
+  const lat = Number(c.env.SITE_LAT);
+  const lon = Number(c.env.SITE_LON);
+  const haveCoords = Boolean(c.env.SITE_LAT) && Boolean(c.env.SITE_LON) && Number.isFinite(lat) && Number.isFinite(lon);
+  const sun = haveCoords
+    ? items.flatMap((it) => {
+        const s = sunTimes(it.date, lat, lon);
+        return s ? [{ date: it.date, sunrise: s.sunrise, sunset: s.sunset }] : [];
+      })
+    : undefined;
+
+  c.header("Cache-Control", "public, max-age=120");
+  return c.json({ days, items, ...(sun ? { sun } : {}) });
 });
 
 // Species richness: distinct species per day.
