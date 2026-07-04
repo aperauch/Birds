@@ -1,8 +1,7 @@
 # 🐦 Birds
 
 A little microphone outside listens for birdsong, an AI model figures out
-which species is singing, and this project turns that into a live dashboard —
-plus a color e-paper picture frame that shows today's visitors.
+which species is singing, and this project turns that into a live dashboard.
 
 **See it live: [birds.aperauch.com](https://birds.aperauch.com)**
 
@@ -10,8 +9,7 @@ Built entirely on the [Cloudflare Developer Platform](https://developers.cloudfl
 (Workers, D1, R2, Durable Objects, Queues, Workers AI), fed by a
 [BirdNET-Pi](https://github.com/Nachtzuster/BirdNET-Pi) acoustic sensor.
 Inspired by [Avian Visitors](https://theodore.net/projects/AvianVisitors/), but
-re-architected around Workers with a richer art pipeline, real-time updates,
-and a full analytics suite.
+developed to be hosted as Cloudflare Workers using Typescript.
 
 ---
 
@@ -21,13 +19,9 @@ and a full analytics suite.
   WebSocket — no refresh needed
 - 🔊 **Click any bird** to hear the real recording and watch a real
   spectrogram scrub by
-- 🎨 **Species art**: an AI-generated illustration on first sighting, plus a
-  real reference photo (eBird / Wikipedia / iNaturalist, whichever has one)
 - 📈 **Trends & analytics**: daily activity, a dawn-chorus-by-hour heatmap,
   which species get heard together, streaks and records, and a CSV export of
   your whole detection history
-- 🖼️ **A physical picture frame**: a Raspberry Pi + color e-paper panel that
-  displays a dithered daily collage of who's been singing
 - 🔔 **Notifications** (via [ntfy](https://ntfy.sh)) when a new or rare
   species shows up
 - 📱 Installable as a PWA, dark mode, keyboard shortcuts, works great on
