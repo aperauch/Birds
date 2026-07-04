@@ -30,17 +30,18 @@ developed to be hosted as Cloudflare Workers using Typescript.
 ## How it works
 
 ```
-SENSOR (Raspberry Pi 5 + EM272 mic)
+SENSOR (Raspberry Pi 5 + AudioMoth mic)
   BirdNET-Pi  ──detections──>  forwarder.py ──HTTPS(outbound)──┐
                                                                │
 CLOUDFLARE EDGE                                                ▼
   Ingest Worker ─> D1 (detections/species) + R2 (clips/art) + Aviary DO
   Aviary DO     ─> WebSocket live broadcast to dashboard + frame
-  Art Worker    ─> FLUX species art, SDXL img2img of spectrograms, photos
+  Art Worker    ─> photo (Macaulay/Wikipedia), FLUX species-art fallback,
+                   SDXL img2img of spectrograms (generated, not shown in the UI)
   Dashboard     ─> live feed, collage, click-to-listen, timeline, analytics
   Frame Worker  ─> Browser Rendering -> dithered PNG for the e-paper panel
                                                                │
-FRAME (Pi Zero 2W + Inky Impression / Spectra 6) <──pulls PNG──┘
+FRAME (Pi Zero 2W + Inky Impression / Spectra 6 — not yet built) <──pulls PNG──┘
 ```
 
 The Raspberry Pi is **outbound-only** — it's never exposed to the internet.
@@ -53,7 +54,7 @@ Everything public lives on Cloudflare.
 | `edge/`    | Cloudflare Workers: ingest, API, Aviary Durable Object, art, frame   |
 | `web/`     | Dashboard SPA (collage, live feed, timeline, analytics)              |
 | `sensor/`  | Raspberry Pi forwarder + BirdNET-Pi tuning + EM272 mic setup         |
-| `frame/`   | Pi Zero e-paper client                                               |
+| `frame/`   | Pi Zero e-paper client — not yet built or tested on real hardware   |
 | `docs/`    | Hardware build & bill of materials, architecture, API reference      |
 | `infra/`   | Provisioning notes, bindings, secrets                                |
 
@@ -69,12 +70,23 @@ Everything public lives on Cloudflare.
 
 - [x] Phase 1 — Cloudflare data backbone (D1, R2, Ingest, Aviary DO)
 - [x] Phase 2 — Live dashboard MVP (WebSocket feed, collage, click-to-listen, timeline)
-- [x] Phase 3 — Art pipeline (Wikipedia photo, FLUX.2 species art, SDXL img2img of spectrograms)
-- [ ] Phase 3.5 — Background cutout (3.5a) done; silhouette-mask packing and
-      the generative/data-art tile style (3.5b/c) were not built — the collage
-      still packs rectangular tiles (see `web/README.md` Notes)
+- [x] Phase 3 — Art pipeline (Wikipedia/Macaulay photo, FLUX species-art
+      fallback, SDXL img2img of spectrograms). The spectrogram artwork is
+      generated and stored in R2 but isn't surfaced anywhere in the dashboard
+      UI — see Phase 3.5
+- [ ] Phase 3.5 — Background cutout (3.5a) is generated but unused; silhouette-
+      mask packing, the generative/data-art tile style, and any user-facing
+      photo/art toggle (3.5b/c) were not built. The "Art" concepts (stylized
+      spectrograms, cutouts, generative tiles) that once existed have been
+      removed from the live dashboard at birds.aperauch.com — tiles show only
+      a real photo, or a plain FLUX illustration as a silent fallback when no
+      photo exists. The collage always packs rectangular tiles (see
+      `web/README.md` Notes)
 - [x] Phase 4 — Analytics (daily rollups, trends view, charts) + streamed CSV export
-- [x] Phase 5 — Color e-paper frame (`/frame` + edge dither + cron + Pi client)
+- [ ] Phase 5 — Color e-paper frame: the edge side (`/frame`, dithering,
+      15-min cron) is deployed, but the physical Pi Zero + Inky panel and its
+      client code (`frame/`) have not been built or tested against real
+      hardware
 - [x] Phase 6 — Notifications via ntfy (Web Push / VAPID was built but never
       worked and has been removed)
 - [x] Phase 7 — Dashboard polish & analytics expansion: self-hosted fonts,
