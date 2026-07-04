@@ -19,7 +19,19 @@
     // Built dashboard SPA (web/) is uploaded here once Phase 2 lands.
     "directory": "../web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Without this, Cloudflare's default asset-first routing intercepts any
+    // request that LOOKS like a navigation (e.g. a same-origin <a download>
+    // click, which browsers send with navigation-style fetch metadata) to a
+    // path that isn't a literal static file — including /api/*, since none of
+    // those paths exist in web/dist — and serves the SPA's index.html for it
+    // *before this Worker's fetch() ever runs*. That's the exact cause of the
+    // "Export CSV downloads index.html" bug: plain fetch()/curl requests
+    // aren't classified as navigations so they reached the Worker fine, but
+    // the anchor's download-triggered request did not. Routing every request
+    // through the Worker first restores this file's own routing (including
+    // its ASSETS.fetch() fallback for genuine static files) as authoritative.
+    "run_worker_first": true
   },
   "durable_objects": {
     "bindings": [
@@ -87,7 +99,7 @@
     "MEDIA_PREFIX": "/media",
     "RARE_SPECIES_DAYS": "30",
     // FRAME_KEY gates /media/frame/* (set a real value to enable). NTFY_TOPIC
-    // enables ntfy notifications when set. VAPID_* are secrets (wrangler secret put).
+    // enables ntfy notifications when set.
     "FRAME_KEY": "",
     "NTFY_TOPIC": ""
   }

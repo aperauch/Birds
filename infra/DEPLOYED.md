@@ -1,7 +1,5 @@
 # Deployed state (production)
 
-Account: **Aperauch** (`[redacted]`)
-Zone: **aperauch.com** (`2e4db964aed0ff2b29d68e57f3f373e1`, Enterprise)
 Worker: **birds-edge** → https://birds.aperauch.com
 
 ## Resource IDs (already wired into wrangler.jsonc)

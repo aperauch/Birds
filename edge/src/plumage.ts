@@ -171,7 +171,8 @@ async function gbifPhotos(sci: string): Promise<PlumagePhoto[]> {
       const lic = ccLabel(m.license);
       if (!lic) continue; // CC / public-domain only
       let url = m.identifier.replace(/^http:/, "https:");
-      // Accept iNaturalist-hosted photos only. GBIF also returns xeno-canto sound
+      // Accept iNaturalist-hosted photos only (exact hosts — a substring match
+      // would accept lookalike domains). GBIF also returns xeno-canto sound
       // spectrogram PNGs as "StillImage"; restricting the host excludes those.
       let host = "";
       try {
@@ -179,7 +180,8 @@ async function gbifPhotos(sci: string): Promise<PlumagePhoto[]> {
       } catch {
         continue;
       }
-      if (!host.includes("inaturalist")) continue;
+      if (host !== "static.inaturalist.org" && host !== "inaturalist-open-data.s3.amazonaws.com")
+        continue;
       // Use a mid-size variant of iNaturalist originals.
       url = url.replace(/\/original\.(jpe?g|png)(\?.*)?$/i, "/medium.$1");
       if (seen.has(url)) continue;

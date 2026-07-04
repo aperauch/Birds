@@ -1,3 +1,16 @@
+# Security headers for assets served directly by Workers Assets (the Worker
+# never runs for those requests). Worker-built responses (API, /media, SPA
+# fallback) get the same set from the middleware in edge/src/index.ts — keep
+# the two in sync, and keep img-src in sync with safeExternalUrl in
+# edge/src/media.ts. style-src needs 'unsafe-inline' (the app sets style
+# attributes); connect-src 'self' covers same-origin fetch + the /ws WebSocket.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.download.ams.birds.cornell.edu https://www.allaboutbirds.org https://celebrateurbanbirds.org https://www.celebrateurbanbirds.org https://static.inaturalist.org https://inaturalist-open-data.s3.amazonaws.com; media-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
 # Hashed build assets are content-addressed and never change — cache them hard so
 # repeat loads don't revalidate. (Workers Assets serves these from /assets/.)
 /assets/*

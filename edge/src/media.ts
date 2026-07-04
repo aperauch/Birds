@@ -29,6 +29,31 @@ export function mediaUrl(env: Bindings, key: string | null | undefined): string 
   return `${env.PUBLIC_BASE_URL}${env.MEDIA_PREFIX}/${key}`;
 }
 
+// External hosts that photo/link URLs handed to the SPA may point at. Scraped
+// upstream HTML (CUB galleries, GBIF media records, KV-cached entries from
+// older code) is not trusted enough to pass the browser a raw URL: anything
+// not https on one of these hosts is dropped. Must stay in sync with the
+// img-src CSP allowlist (web/public/_headers and index.ts).
+const EXTERNAL_PHOTO_HOSTS = new Set([
+  "cdn.download.ams.birds.cornell.edu", // Macaulay asset CDN
+  "www.allaboutbirds.org",
+  "celebrateurbanbirds.org",
+  "www.celebrateurbanbirds.org",
+  "static.inaturalist.org",
+  "inaturalist-open-data.s3.amazonaws.com",
+]);
+
+/** The URL if it is https on an allowlisted photo host, else null. */
+export function safeExternalUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && EXTERNAL_PHOTO_HOSTS.has(u.hostname) ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 const CONTENT_TYPES: Record<string, string> = {
   mp3: "audio/mpeg",
   png: "image/png",

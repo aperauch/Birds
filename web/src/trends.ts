@@ -58,6 +58,15 @@ const RANGES: { label: string; days: number }[] = [
 ];
 let rangeDays = 30;
 
+// "All" uses a from=0 (epoch) query instead of clamping to the 3650-day
+// sentinel used elsewhere, so the export genuinely covers every detection
+// regardless of how old the data is.
+function exportHref(days: number): string {
+  const to = Math.floor(Date.now() / 1000);
+  const from = days >= RANGES[RANGES.length - 1]!.days ? 0 : to - days * 86400;
+  return `/api/export.csv?from=${from}&to=${to}`;
+}
+
 function card(titleText: string, body: SVGElement | HTMLElement, wide = false): HTMLElement {
   const c = document.createElement("section");
   c.className = wide ? "trend-card wide" : "trend-card";
@@ -569,10 +578,16 @@ export async function renderTrends(container: HTMLElement): Promise<void> {
   if (!container.querySelector(".trend-head")) {
     container.innerHTML = `<div class="trend-head"><h2>Trends</h2>
       <nav class="range" aria-label="time range"></nav>
-      <a class="export" href="/api/export.csv" download>Export CSV ↓</a>
+      <a class="export" href="${exportHref(rangeDays)}" download>Export CSV ↓</a>
       <nav class="jump" aria-label="sections"></nav></div>
       <div class="trend-grid"><p class="loading">Loading analytics…</p></div>`;
     const range = container.querySelector(".range") as HTMLElement;
+    const exportLink = container.querySelector("a.export") as HTMLAnchorElement;
+    // Refresh `to` to the actual click time even if the tab's been open a
+    // while since the range was last changed.
+    exportLink.addEventListener("click", () => {
+      exportLink.href = exportHref(rangeDays);
+    });
     for (const r of RANGES) {
       const b = document.createElement("button");
       b.textContent = r.label;
@@ -581,6 +596,7 @@ export async function renderTrends(container: HTMLElement): Promise<void> {
         rangeDays = r.days;
         for (const c of range.children) c.classList.remove("active");
         b.classList.add("active");
+        exportLink.href = exportHref(rangeDays);
         void draw(container);
       });
       range.append(b);

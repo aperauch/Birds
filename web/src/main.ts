@@ -723,8 +723,7 @@ function applyRoute(): void {
   else closeModal();
 }
 
-// Register the caching service worker (speeds up repeat loads). Idempotent with
-// the push registration in notify.ts (same script URL).
+// Register the caching service worker (speeds up repeat loads).
 function registerServiceWorker(): void {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {

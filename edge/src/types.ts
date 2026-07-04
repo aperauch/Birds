@@ -19,10 +19,6 @@ export interface Bindings {
   SITE_LAT: string; // sensor latitude, degrees (empty = dawn-chorus sunrise overlay disabled)
   SITE_LON: string; // sensor longitude, degrees, negative = west (empty = disabled)
   INGEST_TOKEN: string;
-  PUSH_TEST_TOKEN: string; // temporary: auth for POST /admin/push-test
-  VAPID_PUBLIC_KEY: string; // web-push (empty = disabled)
-  VAPID_PRIVATE_KEY: string;
-  VAPID_SUBJECT: string; // mailto: or https: contact for VAPID
 }
 
 // Payload the sensor forwarder sends (the `meta` part of the multipart body).

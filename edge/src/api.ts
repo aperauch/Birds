@@ -2,7 +2,7 @@
 import { Hono } from "hono";
 import type { Bindings, DetectionRow, SpeciesRow } from "./types";
 import { aggregateWindow, detectionsInWindow, getSpecies, listSpecies, recentDetections } from "./db";
-import { mediaUrl } from "./media";
+import { mediaUrl, safeExternalUrl } from "./media";
 import { ebirdUrl, resolveEbirdCode } from "./ebird";
 import { getCubInfo, type PlumagePhoto } from "./plumage";
 import { getCachedMacaulay } from "./macaulay";
@@ -128,7 +128,12 @@ api.get("/species/:sci", async (c) => {
   }
 
   const useEbird = ebirdPhotos.length > 0;
-  const plumage_photos = useEbird ? ebirdPhotos : cub.photos;
+  // Drop any photo whose URL isn't https on an allowlisted host — these come
+  // from scraped HTML / external APIs, so don't hand the browser a raw URL.
+  const plumage_photos = (useEbird ? ebirdPhotos : cub.photos).flatMap((p) => {
+    const url = safeExternalUrl(p.url);
+    return url ? [{ ...p, url }] : [];
+  });
   const plumage_source: "ebird" | "cub" | "aab" | "obs" | null = useEbird ? "ebird" : cub.source;
 
   const { results } = await c.env.DB.prepare(
@@ -139,45 +144,10 @@ api.get("/species/:sci", async (c) => {
   return c.json({
     species: enrichSpecies(c.env, s),
     recent: (results ?? []).map((d) => enrichDetection(c.env, d)),
-    cub_url: cub.url,
+    cub_url: safeExternalUrl(cub.url),
     plumage_photos,
     plumage_source,
   });
-});
-
-// --- Phase 6 web-push subscription management ------------------------------
-
-// Public VAPID key + whether push is enabled, for the client to subscribe.
-api.get("/push/key", (c) => {
-  return c.json({ enabled: Boolean(c.env.VAPID_PUBLIC_KEY), key: c.env.VAPID_PUBLIC_KEY || null });
-});
-
-// Store (or refresh) a PushSubscription.
-api.post("/push/subscribe", async (c) => {
-  const sub = (await c.req.json().catch(() => null)) as {
-    endpoint?: string;
-    keys?: { p256dh?: string; auth?: string };
-  } | null;
-  if (!sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
-    return c.json({ error: "invalid subscription" }, 400);
-  }
-  await c.env.DB.prepare(
-    `INSERT INTO push_subscriptions (endpoint, p256dh, auth)
-     VALUES (?, ?, ?)
-     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`,
-  )
-    .bind(sub.endpoint, sub.keys.p256dh, sub.keys.auth)
-    .run();
-  return c.json({ ok: true });
-});
-
-api.post("/push/unsubscribe", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { endpoint?: string } | null;
-  if (!body?.endpoint) return c.json({ error: "endpoint required" }, 400);
-  await c.env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?")
-    .bind(body.endpoint)
-    .run();
-  return c.json({ ok: true });
 });
 
 // Lightweight analytics (Phase 4 expands this into richer rollups).

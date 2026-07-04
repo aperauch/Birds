@@ -1,11 +1,9 @@
-// Birds service worker.
-//   1. Web Push notifications (Phase 6).
-//   2. Caching to speed up repeat loads:
-//        - hashed /assets/* + self-hosted /fonts/* -> cache-first (immutable)
-//        - navigations (index.html)        -> network-first, cache fallback
-//        - /api/species                    -> stale-while-revalidate
-//      Live/data endpoints (/api/recent, /api/aggregate, /ws, /media, images)
-//      are left to the browser HTTP cache / network so data stays fresh.
+// Birds service worker: caching to speed up repeat loads.
+//   - hashed /assets/* + self-hosted /fonts/* -> cache-first (immutable)
+//   - navigations (index.html)        -> network-first, cache fallback
+//   - /api/species                    -> stale-while-revalidate
+// Live/data endpoints (/api/recent, /api/aggregate, /ws, /media, images)
+// are left to the browser HTTP cache / network so data stays fresh.
 const CACHE = "birds-cache-v2"; // v2: self-hosted fonts replaced Google Fonts
 
 self.addEventListener("install", () => self.skipWaiting());
@@ -73,34 +71,4 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(networkFirst(req)); // fresh HTML (+ asset hashes), cache offline
   }
   // Everything else (live APIs, /ws, /media, /cdn-cgi/image) -> default handling.
-});
-
-// --- Web Push -------------------------------------------------------------
-self.addEventListener("push", (event) => {
-  let data = { title: "New bird detected", body: "", url: "/" };
-  try {
-    if (event.data) data = { ...data, ...event.data.json() };
-  } catch (_) {
-    /* non-JSON payload; keep defaults */
-  }
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      tag: data.tag || "birds",
-      data,
-    }),
-  );
-});
-
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/";
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const client of list) {
-        if ("focus" in client) return client.focus();
-      }
-      return self.clients.openWindow(url);
-    }),
-  );
 });

@@ -8,11 +8,48 @@ import { api } from "./api";
 import { contentTypeFor } from "./media";
 import { regenerateFrame, renderFrameHtml } from "./frame";
 import { ingestMacaulay, type MacaulayIngest } from "./macaulay";
-import { sendTestPush } from "./notify";
 
 export { Aviary } from "./aviary";
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+// Content-Security-Policy for HTML responses. img-src must stay in sync with
+// the external photo-host allowlist in media.ts (safeExternalUrl); the static
+// copy of these headers for directly-served assets lives in web/public/_headers.
+// style-src needs 'unsafe-inline': the SPA and /frame set style attributes.
+// connect-src 'self' covers same-origin fetch + the /ws WebSocket.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https://cdn.download.ams.birds.cornell.edu https://www.allaboutbirds.org https://celebrateurbanbirds.org https://www.celebrateurbanbirds.org https://static.inaturalist.org https://inaturalist-open-data.s3.amazonaws.com",
+  "media-src 'self'",
+  "connect-src 'self'",
+  "font-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+// Security headers on every response this Worker builds (API JSON, /media,
+// SPA fallback, /frame). Assets served directly by Workers Assets get the same
+// set from web/public/_headers, so only set what isn't already present.
+app.use("*", async (c, next) => {
+  await next();
+  if (c.res.status === 101) return; // WebSocket upgrade: headers are immutable
+  const res = new Response(c.res.body, c.res);
+  const h = res.headers;
+  if (!h.has("X-Content-Type-Options")) h.set("X-Content-Type-Options", "nosniff");
+  if (!h.has("Referrer-Policy")) h.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  if ((h.get("Content-Type") ?? "").includes("text/html")) {
+    if (!h.has("Content-Security-Policy")) h.set("Content-Security-Policy", CSP);
+    if (!h.has("X-Frame-Options")) h.set("X-Frame-Options", "DENY");
+    if (!h.has("Permissions-Policy"))
+      h.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  }
+  c.res = res;
+});
 
 app.get("/healthz", (c) => c.json({ ok: true, service: "birds-edge" }));
 
@@ -133,22 +170,14 @@ app.post("/admin/backfill-photos", async (c) => {
   return c.json({ ok: true, ...result });
 });
 
-// Temporary diagnostic: send a test web-push to all subscriptions and report
-// the push-service status per subscription. Guarded by PUSH_TEST_TOKEN.
-app.post("/admin/push-test", async (c) => {
-  const auth = c.req.header("Authorization") ?? "";
-  if (!c.env.PUSH_TEST_TOKEN || auth !== `Bearer ${c.env.PUSH_TEST_TOKEN}`) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-  return c.json(await sendTestPush(c.env));
-});
-
 // Read API.
 app.route("/api", api);
 
 // Everything else -> built dashboard SPA (Workers Assets). Falls back to a
 // placeholder until the web/ app is built in Phase 2.
 app.get("*", async (c) => {
+  // Unknown API routes must 404 as JSON, not fall through to the SPA shell.
+  if (c.req.path.startsWith("/api/")) return c.json({ error: "not found" }, 404);
   if (c.env.ASSETS) {
     const res = await c.env.ASSETS.fetch(c.req.raw);
     if (res.status !== 404) return res;

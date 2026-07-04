@@ -13,7 +13,7 @@ Two small builds: the **sensor node** (always-on, listens + detects) and the
 | 1 | microSD ≥32 GB (A2) | $10 | OS |
 | 1 | NVMe HAT + small SSD (optional) | $25–40 | Durable clip archive; spares the SD |
 | 1 | **Primo EM272 / EM272M capsule mic** (see below) | $30–90 | Low-noise audio front-end |
-| 1 | **AudioMoth USB Microphone** _(selected)_ | ~$100 | USB-powered (no batteries); 1.2.0-grade audio front-end. Powers the EM272 (plug-in-power) via its 3.5 mm jack and digitizes to the Pi |
+| 1 | **AudioMoth USB Microphone** _(selected — any USB mic works)_ | ~$100 | USB-powered (no batteries); 1.2.0-grade audio front-end. Powers the EM272 (plug-in-power) via its 3.5 mm jack and digitizes to the Pi |
 | 1 | USB sound card w/ biased mic-in (budget alt.) | $8–35 | CM108 dongle or Sound Blaster Play! 4, if not using the AudioMoth |
 | 1 | Furry windscreen ("dead-cat") | $7 | **Essential** outdoors — kills wind roar |
 | 1 | Weatherproof mount / junction box | $10 | Capsule out, Pi inside/dry |
@@ -40,10 +40,11 @@ supplies the capsule's **plug-in-power (PIP, ~2–5 V)**. PIP is **not** 48 V
 phantom power, so no phantom interface is required.
 
 **Selected front-end (this build) — AudioMoth USB Microphone:**
-This build uses the **AudioMoth USB Microphone** (~$100 via GroupGets). It is
+This build uses the **AudioMoth USB Microphone** (~$100 via GroupGets), with a
+product SKU/hardware revision of **`USB-1.0.0`** (the USB Microphone's own
+first revision — *not* the old AudioMoth 1.0.0 audio hardware). It is
 **USB-powered (no batteries)** and uses the **same audio front-end as the
-standard AudioMoth 1.2.0**, so you get 1.2.0-grade recording quality. (Its product SKU reads `USB-1.0.0` — that is the USB
-Microphone's own first revision, *not* the old AudioMoth 1.0.0 audio hardware.)
+standard AudioMoth 1.2.0**, so you get 1.2.0-grade recording quality.
 It has a **3.5 mm jack for an external electret (PIP) mic** plus an
 adjustable-gain preamp and is supported on Linux / Raspberry Pi. The EM272 /
 EM272M plugs straight in; the AudioMoth supplies bias + gain and presents as a
@@ -55,6 +56,21 @@ EM272M (3.5 mm)  ->  AudioMoth USB Microphone  --USB-->  Raspberry Pi
 
 You can start on the AudioMoth's built-in mic and add the EM272 later via the
 3.5 mm jack.
+
+This is just what this build happened to use, though — **any class-compliant
+USB microphone works** (including the CM108-class dongles below); BirdNET-Pi
+only needs an ALSA capture device.
+
+> **⚠️ Firmware gotcha (AudioMoth USB Microphone, hardware `USB-1.0.0`):** ours
+> shipped with firmware **v1.3.0**, and on a **Raspberry Pi 5 running Raspberry
+> Pi OS Lite**, the Pi would only see it as a generic USB device — **not** as a
+> USB audio/microphone device (so it never showed up as an `arecord -l` capture
+> card). Flashing to the latest firmware, **v1.12.1**, did **not** fix this.
+> What fixed it was manually downloading firmware **v1.3.2**
+> (`AudioMoth-USB-Microphone-1.3.2.bin`) from Open Acoustic Devices and
+> flashing that specific version instead — after which the Pi correctly
+> enumerated it as a microphone. If `arecord -l` isn't showing your AudioMoth,
+> try v1.3.2 before assuming it's a hardware fault.
 
 > The battery-powered standalone **AudioMoth logger** is a *different* product
 > (3x AA, records to its own SD card). For this always-on, Pi-tethered build the

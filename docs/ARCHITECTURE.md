@@ -72,7 +72,7 @@ volume from one sensor is low, so a single DO is far below any throughput limit.
 | 3.5 | Background cutout + silhouette-mask packing + generative data-art | **done** |
 | 4 | Analytics (daily rollups + trends charts) + streamed CSV export | **done** |
 | 5 | Color e-paper frame (Browser Rendering + Floyd–Steinberg dither) | **done** |
-| 6 | Notifications (Web Push / VAPID + ntfy) | **done** |
+| 6 | Notifications (ntfy; Web Push was removed — never worked) | **done** |
 
 The original self-contained specs live in [PLAN.md](PLAN.md). Read API is in
 [API.md](API.md).
@@ -95,8 +95,8 @@ The original self-contained specs live in [PLAN.md](PLAN.md). Read API is in
   Cron Trigger screenshots it via Browser Rendering, Floyd–Steinberg dithers to
   the Spectra 6 palette (`edge/src/frame.ts`), and stores `frame/latest.png`
   (gated by `FRAME_KEY`). The Pi client lives in `frame/`.
-- **Notifications (`edge/src/notify.ts`)**: ntfy + Web Push (VAPID JWT +
-  RFC 8291/8188 aes128gcm), throttled per species in KV; subscriptions in D1.
+- **Notifications (`edge/src/notify.ts`)**: ntfy, throttled per species in
+  KV. (Web Push / VAPID was built but never worked and has been removed.)
 
 ## Deferred
 
