@@ -32,6 +32,40 @@ DSP — that's a later phase):
 Point the **EM272 capsule away from the road**, under an eave, with the
 windscreen on. See [`docs/HARDWARE.md`](../docs/HARDWARE.md) for mic placement.
 
+### Using an AudioMoth instead of the EM272
+
+If the mic is an AudioMoth running the USB-microphone firmware:
+
+- The physical **DIP switch must be set to `DEFAULT`** (not `CUSTOM`, not `USB/OFF`).
+- In BirdNET-Pi **Tools → Settings → Advanced Settings**, **Audio Card must be
+  set to `default`** — not a specific `dsnoop:CARD=...` device.
+- Gain only takes values **`0`–`4`** (5 levels, not 1–5) — `4` is already max:
+
+  | Value | Level | Gain (normal range) |
+  |---|---|---|
+  | 0 | Low | 4.33x |
+  | 1 | Low-Medium | 7.00x |
+  | 2 | Medium (default) | 15.00x |
+  | 3 | Medium-High | 25.05x |
+  | 4 | High (max) | 33.00x |
+- **Gain alone doesn't extend detection range** — it amplifies signal and
+  noise together. For actual range, also set a high-pass filter (cuts wind/
+  traffic rumble below where bird song lives, freeing up gain headroom) and
+  match sample rate to what BirdNET-Pi actually analyzes at (48 kHz — 384 kHz
+  is for bats and just makes the Pi downsample every chunk for no benefit):
+  ```bash
+  AudioMoth-USB-Microphone config 48000 gain 4 hpf 1500
+  AudioMoth-USB-Microphone persist
+  ```
+  See the root [`README.md`](../README.md) AudioMoth section for the full
+  rationale, the external-mic option, and settings to leave alone.
+- For firmware family gotchas, gain tuning via CLI, and the udev permission
+  fix needed to configure it headless, see the "AudioMoth USB microphone"
+  section in the root [`README.md`](../README.md). Note if you bench-test
+  with a phone/speaker: high gain clips (and breaks detection) on a source a
+  few feet away — that's a close-range testing artifact, not a problem at
+  real outdoor bird distances.
+
 ## 3. Install the forwarder
 
 ```bash

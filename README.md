@@ -58,6 +58,104 @@ Everything public lives on Cloudflare.
 | `docs/`    | Hardware build & bill of materials, architecture, API reference      |
 | `infra/`   | Provisioning notes, bindings, secrets                                |
 
+<details>
+<summary><b>AudioMoth USB microphone: firmware, udev &amp; gain gotchas</b> (click to expand)</summary>
+
+If the sensor's mic is (or becomes) an AudioMoth run in USB-microphone mode
+instead of the EM272 capsule, a few non-obvious things bit us getting it
+working on a Raspberry Pi 5 (Raspberry Pi OS Lite):
+
+- **Two separate firmware families, easy to conflate.** AudioMoth-Firmware-Basic
+  (standard recording firmware, currently `1.12.1`) and AudioMoth-USB-Microphone
+  (the firmware that makes it enumerate as a USB Audio Class mic, currently
+  `1.3.2`) have independent version numbers. "Updating to the latest firmware"
+  through the AudioMoth Flash App's default option silently reflashes the
+  *basic* firmware over the USB-microphone one — the device stops showing up
+  in `arecord -L` because the basic firmware only exposes a USB HID
+  config interface, not USB audio streaming. Fix: in the Flash App, explicitly
+  pick **AudioMoth USB Microphone** from the firmware menu, not the default
+  firmware. Also make sure the physical switch is set to **DEFAULT** (not
+  `CUSTOM`, not `USB/OFF`) so it enumerates as an audio device at all.
+
+- **Gain isn't configurable from the AudioMoth Configuration App** once
+  running USB-microphone firmware — that app only understands the basic
+  recording firmware. Use the
+  [AudioMoth-USB-Microphone-Cmd](https://github.com/OpenAcousticDevices/AudioMoth-USB-Microphone-Cmd)
+  CLI tool instead (works headless over SSH, no desktop needed — install via
+  its `AudioMothUSBMicrophoneBuilder1.0.2.sh` release script, which compiles
+  from source and drops the binary in `/usr/local/bin`):
+  ```bash
+  AudioMoth-USB-Microphone list           # confirm it's seen, get device ID
+  AudioMoth-USB-Microphone read           # current sample rate / gain / filters
+  AudioMoth-USB-Microphone update gain 4  # 0=Low … 4=High (33.0x); default is 2=Medium (15.0x)
+  AudioMoth-USB-Microphone persist        # survive power cycles
+  ```
+  `update` only touches gain, unlike `config`, which resets every unspecified
+  setting back to default. Gain `4` (High, 33.0x) is what you want for
+  picking up genuinely distant/quiet birds. **Careful when bench-testing with
+  a phone/speaker playing bird calls, though** — at gain `4`, a playback
+  source just a few feet away clips hard enough that BirdNET-Pi stops
+  detecting anything (clipped audio reads as broadband noise in the
+  spectrogram BirdNET classifies on, masking the call structure). That's a
+  testing-distance artifact, not a real-world problem: outdoor birds are far
+  enough away that gain `4` doesn't clip on them. If you do want to bench-test
+  up close, either back off to gain `3` (25.05x) temporarily or move the
+  speaker further away.
+
+- **Beyond gain: filtering and sample rate for more range.** Gain amplifies
+  signal and noise together — it doesn't improve range on its own. Two more
+  effective levers:
+  - **High-pass filter** removes low-frequency noise (wind, traffic rumble,
+    HVAC hum) that eats into headroom and forces gain down. Most bird song
+    lives above ~1–2 kHz, so cutting below that frees up gain to work harder
+    on the frequencies that matter:
+    ```bash
+    AudioMoth-USB-Microphone config 48000 gain 4 hpf 1500
+    AudioMoth-USB-Microphone persist
+    ```
+    (`config`, unlike `update`, resets every *unspecified* setting to
+    default — always respecify sample rate + gain alongside a filter.)
+  - **Sample rate 48 kHz, not 384 kHz.** 384 kHz is meant for bats
+    (ultrasonic content); bird song tops out well under 20 kHz. Running at
+    384 kHz just makes BirdNET-Pi downsample every chunk before analysis,
+    burning Pi CPU for zero detection benefit.
+
+  Leave `LOWGAINRANGE` and `DISABLE48HZ` alone — `LOWGAINRANGE` is a *less*
+  sensitive range meant for loud close-up sources (e.g. bats in hand), and
+  `DISABLE48HZ` extends the low-frequency response *down*, letting in more of
+  the rumble the high-pass filter above is trying to remove.
+
+  For a bigger jump than any config change, firmware 1.3.2 added the
+  `MICROPHONE` command to switch to an **external mic** — a directional
+  (shotgun) mic aimed at your area of interest gets real beamforming gain,
+  which outperforms any internal filter/gain tweak:
+  ```bash
+  AudioMoth-USB-Microphone microphone external
+  ```
+
+- **udev rule has to live in `/etc/udev/rules.d/`, not `/lib/udev/rules.d/`.**
+  A rule in `/lib` gets silently shadowed by Debian's default
+  `50-udev-default.rules` (which assigns the USB device node `0664 root`), so
+  the CLI tool sees the device over `lsusb` but reports "No AudioMoth USB
+  Microphones found" — it can't open the HID interface without write access.
+  Fix:
+  ```bash
+  sudo tee /etc/udev/rules.d/99-audiomoth.rules >/dev/null <<'EOF'
+  SUBSYSTEM=="usb", ATTRS{idVendor}=="16d0", ATTRS{idProduct}=="06f3", MODE="0666"
+  EOF
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --attr-match=idVendor=16d0
+  ```
+  then physically unplug/replug the device (`udevadm control --reload-rules`
+  alone doesn't re-apply rules to an already-enumerated device).
+
+- **BirdNET-Pi's Advanced Settings → Audio Card must be set to `default`**
+  (routes through PulseAudio), not a specific `dsnoop:CARD=...` device —
+  despite BirdNET-Pi's own hint text suggesting `dsnoop` when available,
+  `default` is what actually works reliably with the AudioMoth.
+
+</details>
+
 ## Curious how deep this goes?
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit together
